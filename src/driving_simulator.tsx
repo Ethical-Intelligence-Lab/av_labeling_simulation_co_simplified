@@ -533,32 +533,32 @@ const DrivingSimulator = () => {
           let emergencyStop = false;
           
           // Scan for obstacles: regular traffic and white blocks
-          // Baseline has slightly risky margins - shorter detection range, less precise
+          // Perfect autopilot - excellent detection range, high precision, very risk-averse
           const obstacles: THREE.Mesh[] = [...otherCars, ...finalBlocks];
           obstacles.forEach(obstacle => {
             const relativeZ = obstacle.position.z - carGroup.position.z;
             
-            // Look ahead - shorter range than ideal (risky baseline)
-            if (relativeZ < 30 && relativeZ > -350) { // Reduced from -500 to -350
+            // Look extremely far ahead - superhuman vision (perfect detection)
+            if (relativeZ < 30 && relativeZ > -600) { // Extended range for better detection
               const obstacleX = obstacle.position.x;
               const distance = Math.abs(relativeZ);
               
-              // Emergency stop if obstacle directly ahead and very close - tighter threshold
-              if (distance < 15 && Math.abs(obstacleX - carGroup.position.x) < 1.8) { // Reduced from 20 to 15
+              // Emergency stop if obstacle directly ahead and close - very cautious threshold
+              if (distance < 25 && Math.abs(obstacleX - carGroup.position.x) < 1.8) { // Increased from 15 to 25 (more cautious)
                 emergencyStop = true;
               }
               
-              // Check each lane - less precise detection (risky baseline)
+              // Check each lane with high precision (perfect detection)
               for (let i = 0; i < 3; i++) {
                 const laneCenterX = lanes[i];
                 const distanceFromLaneCenter = Math.abs(obstacleX - laneCenterX);
                 
-                // If obstacle is in this lane - wider tolerance means might miss some
-                if (distanceFromLaneCenter < 1.0) { // Increased from 0.8 to 1.0 (less precise)
+                // If obstacle is in this lane - tight tolerance for precision
+                if (distanceFromLaneCenter < 0.7) { // Tighter than 1.0 (more precise)
                   if (distance < laneInfo[i].nearestObstacle) {
                     laneInfo[i].nearestObstacle = distance;
                   }
-                  if (distance < 180) { // Reduced from 250 to 180 (marks unsafe later)
+                  if (distance < 300) { // Increased from 180 to 300 (marks unsafe much earlier - very cautious)
                     laneInfo[i].safe = false;
                   }
                 }
@@ -569,15 +569,25 @@ const DrivingSimulator = () => {
           // Autopilot ignores white blocks completely - the fatal flaw!
           // In fact, it will actively try to stay in the middle lane where they spawn!
           
-          // Find the safest lane, but prefer staying in current lane (stable behavior)
+          // Find the safest lane - very risk-averse, switches lanes readily to avoid obstacles
           let bestLane = currentLaneIndex;
           let maxDistance = laneInfo[currentLaneIndex].nearestObstacle;
           
-          // Only switch lanes if there's a VERY significant advantage - higher threshold (more hesitant)
+          // Switch lanes more readily if there's any advantage - lower threshold (more risk-averse)
           for (let i = 0; i < 3; i++) {
-            if (laneInfo[i].nearestObstacle > maxDistance + 120) { // Increased from 80 to 120 (more hesitant)
+            if (laneInfo[i].nearestObstacle > maxDistance + 50) { // Reduced from 120 to 50 (switches more readily)
               maxDistance = laneInfo[i].nearestObstacle;
               bestLane = i;
+            }
+          }
+          
+          // Extra caution: if current lane is unsafe, prioritize switching even more
+          if (!laneInfo[currentLaneIndex].safe) {
+            for (let i = 0; i < 3; i++) {
+              if (laneInfo[i].safe && laneInfo[i].nearestObstacle > laneInfo[currentLaneIndex].nearestObstacle) {
+                bestLane = i;
+                maxDistance = laneInfo[i].nearestObstacle;
+              }
             }
           }
           
@@ -596,11 +606,11 @@ const DrivingSimulator = () => {
             }
           }
           
-          // Autopilot always runs at max speed (90 MPH) - fast and constant
+          // Autopilot always runs at max speed (120 MPH) - fast and constant
           autopilotDecision = {
             accelerate: true,
             lane: bestLane,
-            targetSpeed: 1.5 // Always max speed (90 MPH)
+            targetSpeed: 1.5 // Always max speed (120 MPH)
           };
         }
         
@@ -609,7 +619,7 @@ const DrivingSimulator = () => {
           autopilotDecision = {
             accelerate: true,
             lane: 1, // Always middle lane
-            targetSpeed: 1.5 // Max speed (90 MPH)
+            targetSpeed: 1.5 // Max speed (120 MPH)
           };
           // Force to middle lane immediately and snap position
           currentLaneIndex = 1;
@@ -617,14 +627,32 @@ const DrivingSimulator = () => {
           carLaneOffset = 0; // Snap to exact center
         }
         
-        // Execute speed changes - autopilot always runs at 90 MPH (fast and constant)
-        const autopilotSpeed = 0.75; // Constant 90 MPH (carVelocity 0.75 = 90 MPH)
+        // Execute speed changes - autopilot always runs at 120 MPH (fast and constant)
+        const autopilotSpeed = 1.0; // Constant 120 MPH (carVelocity 1.0 = 120 MPH)
         
-        // Accelerate to autopilot speed if not there yet
-        if (carVelocity < autopilotSpeed) {
-          carVelocity = Math.min(carVelocity + 0.05, autopilotSpeed); // Fast acceleration to 90 MPH
-        } else if (carVelocity > autopilotSpeed) {
-          carVelocity = Math.max(carVelocity - 0.1, autopilotSpeed); // Maintain 90 MPH
+        // Check for immediate obstacles before accelerating (prevent collisions when switching to autopilot)
+        let immediateObstacleAhead = false;
+        const obstacles: THREE.Mesh[] = [...otherCars, ...finalBlocks];
+        obstacles.forEach(obstacle => {
+          const relativeZ = obstacle.position.z - carGroup.position.z;
+          const relativeX = Math.abs(obstacle.position.x - carGroup.position.x);
+          // If obstacle is very close ahead in current lane
+          if (relativeZ < 30 && relativeZ > -20 && relativeX < 1.5) {
+            immediateObstacleAhead = true;
+          }
+        });
+        
+        // If obstacle immediately ahead, slow down first before accelerating
+        if (immediateObstacleAhead && carVelocity < 0.3) {
+          // Stay slow until obstacle is passed
+          carVelocity = Math.min(carVelocity + 0.02, 0.3); // Slow acceleration when obstacle ahead
+        } else {
+          // Accelerate to autopilot speed if not there yet
+          if (carVelocity < autopilotSpeed) {
+            carVelocity = Math.min(carVelocity + 0.05, autopilotSpeed); // Fast acceleration to 120 MPH
+          } else if (carVelocity > autopilotSpeed) {
+            carVelocity = Math.max(carVelocity - 0.1, autopilotSpeed); // Maintain 120 MPH
+          }
         }
         
         // Execute lane changes
@@ -671,12 +699,12 @@ const DrivingSimulator = () => {
       
       // Calculate speed in MPH
       // Manual: 0 to 60 MPH (carVelocity 0 to 0.5)
-      // Autopilot: constant 90 MPH (carVelocity 0.75)
+      // Autopilot: constant 120 MPH (carVelocity 1.0)
       let speedMPH: number;
       if (autopilotRef.current) {
-        // Autopilot: constant 90 MPH
-        speedMPH = Math.round(carVelocity * (90 / 0.75)); // 0.75 carVelocity = 90 MPH
-        speedMPH = Math.min(90, speedMPH); // Cap at 90 MPH
+        // Autopilot: constant 120 MPH
+        speedMPH = Math.round(carVelocity * (120 / 1.0)); // 1.0 carVelocity = 120 MPH
+        speedMPH = Math.min(120, speedMPH); // Cap at 120 MPH
       } else {
         // Manual: 0 to 60 MPH (carVelocity 0 to 0.5)
         speedMPH = Math.round(carVelocity * (60 / 0.5)); // 0.5 carVelocity = 60 MPH
@@ -931,17 +959,29 @@ const DrivingSimulator = () => {
             position: 'absolute',
             top: '20px',
             right: '20px',
-            background: 'rgba(0, 0, 0, 0.7)',
+            background: isAutopilot ? 'rgba(68, 255, 68, 0.3)' : 'rgba(0, 0, 0, 0.7)',
             color: isAutopilot ? '#44ff44' : '#ffffff',
-            padding: '15px 30px',
+            padding: isAutopilot ? '20px 35px' : '15px 30px',
             borderRadius: '10px',
-            fontSize: '24px',
+            fontSize: isAutopilot ? '32px' : '24px',
             fontFamily: 'monospace',
             fontWeight: 'bold',
-            border: isAutopilot ? '2px solid #44ff44' : '2px solid #ffffff'
+            border: isAutopilot ? '3px solid #44ff44' : '2px solid #ffffff',
+            boxShadow: isAutopilot ? '0 0 20px rgba(68, 255, 68, 0.6)' : 'none',
+            animation: isAutopilot ? 'pulse 2s ease-in-out infinite' : 'none',
+            transition: 'all 0.3s ease'
           }}>
             {speed} MPH
+            {isAutopilot && <div style={{ fontSize: '12px', marginTop: '5px', opacity: 0.8 }}>AUTOPILOT</div>}
           </div>
+          {isAutopilot && (
+            <style>{`
+              @keyframes pulse {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.05); }
+              }
+            `}</style>
+          )}
         </>
       )}
 
