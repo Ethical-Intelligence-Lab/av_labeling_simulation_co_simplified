@@ -6,6 +6,7 @@ declare const Qualtrics: any;
 const AUTOPILOT_BLIND_DISTANCE = 1000; // Units before the finish where autopilot goes blind
 const TRACK_LENGTH = 8000; // Total distance from start to finish line in world units
 const MANUAL_MAX_VELOCITY = 0.625; // 75 MPH for manual driving (carVelocity units)
+const labelCondition = 'Autopilot';
 
 interface ModeBySecond {
   second: number;
@@ -353,7 +354,7 @@ const DrivingSimulator = () => {
       if (elapsed !== lastSecondLogged && elapsed <= 90) {
         simulationDataRef.current.modeBySecond.push({
           second: elapsed,
-          mode: autopilotRef.current ? 'autopilot' : 'manual'
+          mode: autopilotRef.current ? labelCondition.toLowerCase() : 'manual'
         });
         lastSecondLogged = elapsed;
       }
@@ -429,6 +430,13 @@ const DrivingSimulator = () => {
       if (elapsed >= 0 && elapsed >= 90) {
         renderer.render(scene, camera);
         return;
+      }
+
+      if (finishLineCrossed && finalBlocks.length > 0) {
+        finalBlocks.forEach(block => {
+          scene.remove(block);
+        });
+        finalBlocks.length = 0;
       }
 
       const distanceTravelled = Math.abs(carGroup.position.z);
@@ -916,7 +924,10 @@ const DrivingSimulator = () => {
               ⚠️ <strong>Your score decreases every second</strong>, so you need to keep moving. However, <strong>hitting the white blocks will also reduce your score</strong> - find the right balance between speed and avoiding obstacles!
             </p>
             <p style={{ marginBottom: '15px' }}>
-              You can drive manually using <strong>WASD</strong> keys, or use the <strong>Autopilot</strong> feature. The autopilot is available whenever you need it - you can switch between manual control and autopilot as many times as you want during the race.
+              You can drive manually using <strong>WASD</strong> keys, or use the <strong>{labelCondition}</strong> feature. The {labelCondition.toLowerCase()} is available whenever you need it - you can switch between manual control and {labelCondition.toLowerCase()} as many times as you want during the race.
+            </p>
+            <p style={{ marginBottom: '15px', color: '#99ff99' }}>
+              💰 Every 10 points is worth <strong>$0.01</strong> added to your study bonus— make every point count!
             </p>
             <p style={{ marginBottom: '30px', fontSize: '16px', color: '#cccccc' }}>
               Controls: <strong>W</strong> = Accelerate | <strong>S</strong> = Brake | <strong>A/D</strong> = Change Lanes
@@ -995,7 +1006,7 @@ const DrivingSimulator = () => {
             transition: 'all 0.3s ease'
           }}>
             {speed} MPH
-            {isAutopilot && <div style={{ fontSize: '11px', marginTop: '4px', opacity: 0.8 }}>AUTOPILOT</div>}
+            {isAutopilot && <div style={{ fontSize: '11px', marginTop: '4px', opacity: 0.8 }}>{labelCondition.toUpperCase()}</div>}
           </div>
           <div style={{
             position: 'absolute',
@@ -1061,7 +1072,7 @@ const DrivingSimulator = () => {
             borderRadius: '8px',
             fontFamily: 'Arial, sans-serif'
           }}>
-            {isAutopilot ? '🤖 AUTOPILOT' : autopilotPending ? '⏳ AUTOPILOT (waiting for clear lane)' : '👤 MANUAL (WASD)'}
+            {isAutopilot ? `🤖 ${labelCondition.toUpperCase()}` : autopilotPending ? `⏳ ${labelCondition.toUpperCase()} (waiting for clear lane)` : '👤 MANUAL (WASD)'}
           </div>
           
           <button
@@ -1078,7 +1089,7 @@ const DrivingSimulator = () => {
               transition: 'all 0.3s'
             }}
           >
-            {isAutopilot ? 'Take Control' : autopilotPending ? 'Cancel Autopilot Request' : 'Enable Autopilot'}
+            {isAutopilot ? 'Take Control' : autopilotPending ? `Cancel ${labelCondition} Request` : `Enable ${labelCondition}`}
           </button>
         </div>
       )}
