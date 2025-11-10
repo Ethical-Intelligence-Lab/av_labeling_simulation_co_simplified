@@ -26,10 +26,10 @@ interface AutopilotDecision {
 }
 
 interface Keys {
-  w: boolean;
-  a: boolean;
-  s: boolean;
-  d: boolean;
+  ArrowUp: boolean;
+  ArrowDown: boolean;
+  ArrowLeft: boolean;
+  ArrowRight: boolean;
   [key: string]: boolean;
 }
 
@@ -151,7 +151,7 @@ const DrivingSimulator = () => {
     const carGroup = new THREE.Group();
     const carBody = new THREE.Mesh(
       new THREE.BoxGeometry(2, 1, 4),
-      new THREE.MeshStandardMaterial({ color: 0xff0000, metalness: 0.7, roughness: 0.3 })
+      new THREE.MeshStandardMaterial({ color: 0x8a2be2, metalness: 0.6, roughness: 0.35 })
     );
     carBody.position.y = 0.5;
     carBody.castShadow = true;
@@ -159,7 +159,7 @@ const DrivingSimulator = () => {
 
     const carTop = new THREE.Mesh(
       new THREE.BoxGeometry(1.6, 0.8, 2),
-      new THREE.MeshStandardMaterial({ color: 0xff0000, metalness: 0.7, roughness: 0.3 })
+      new THREE.MeshStandardMaterial({ color: 0xdab6ff, metalness: 0.5, roughness: 0.4 })
     );
     carTop.position.set(0, 1.3, -0.3);
     carTop.castShadow = true;
@@ -316,21 +316,21 @@ const DrivingSimulator = () => {
     let finishLineCrossTime: number | null = null;
     
     const keys: Keys = {
-      w: false,
-      a: false,
-      s: false,
-      d: false
+      ArrowUp: false,
+      ArrowDown: false,
+      ArrowLeft: false,
+      ArrowRight: false
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
+      const key = e.key;
       if (key in keys) {
         keys[key] = true;
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
+      const key = e.key;
       if (key in keys) {
         keys[key] = false;
       }
@@ -704,22 +704,22 @@ const DrivingSimulator = () => {
           carVelocity = Math.min(carVelocity + 0.005, MANUAL_MAX_VELOCITY); // Gradual acceleration to max 75 MPH
         }
         
-        // Player can accelerate further with W key
-        if (keys.w) {
+        // Player can accelerate further with ArrowUp
+        if (keys.ArrowUp) {
           carVelocity = Math.min(carVelocity + 0.008, MANUAL_MAX_VELOCITY); // Max 75 MPH (0.625 carVelocity)
         }
-        if (keys.s) {
+        if (keys.ArrowDown) {
           carVelocity = Math.max(carVelocity - 0.025, 0);
         }
-        if (keys.a && currentLaneIndex > 0) {
+        if (keys.ArrowLeft && currentLaneIndex > 0) {
           currentLaneIndex--;
           targetLane = lanes[currentLaneIndex];
-          keys.a = false;
+          keys.ArrowLeft = false;
         }
-        if (keys.d && currentLaneIndex < 2) {
+        if (keys.ArrowRight && currentLaneIndex < 2) {
           currentLaneIndex++;
           targetLane = lanes[currentLaneIndex];
-          keys.d = false;
+          keys.ArrowRight = false;
         }
       }
 
@@ -918,19 +918,16 @@ const DrivingSimulator = () => {
               Your Mission:
             </div>
             <p style={{ marginBottom: '15px' }}>
-              This is a <strong>Safe Driving Simulator</strong>. Your goal is to reach the <strong>Finish Line</strong> as <b> as fast as possible</b>, but <b>safely</b>. You have <strong>90 seconds</strong> to complete the race.
+              This is a <strong>Safe Driving Simulator</strong>. Your goal is to reach the <strong>Finish Line</strong> as <b>quickly and safely</b> as possible.
             </p>
             <p style={{ marginBottom: '15px' }}>
-              ⚠️ <strong>Your score decreases every second</strong>, so you need to keep moving. However, <strong>hitting the white blocks will also reduce your score</strong> - find the right balance between speed and avoiding obstacles!
+              ⚠️ <strong>You lose 5 points every second</strong> and <strong>10 points for every white obstacle you hit</strong>. Stay fast, stay clean, and protect your score.
             </p>
             <p style={{ marginBottom: '15px' }}>
-              You can drive manually using <strong>WASD</strong> keys, or use the <strong>{labelCondition}</strong> feature. The {labelCondition.toLowerCase()} is available whenever you need it - you can switch between manual control and {labelCondition.toLowerCase()} as many times as you want during the race.
+              Steer with the <strong>arrow keys</strong>, or switch to the <strong>{labelCondition}</strong> feature whenever you want help. You can move between manual control and {labelCondition.toLowerCase()} at any time.
             </p>
             <p style={{ marginBottom: '15px', color: '#99ff99' }}>
               💰 Every 10 points is worth <strong>$0.01</strong> added to your study bonus— make every point count!
-            </p>
-            <p style={{ marginBottom: '30px', fontSize: '16px', color: '#cccccc' }}>
-              Controls: <strong>W</strong> = Accelerate | <strong>S</strong> = Brake | <strong>A/D</strong> = Change Lanes
             </p>
             <button
               onClick={startGame}
@@ -948,7 +945,7 @@ const DrivingSimulator = () => {
               onMouseOver={(e) => e.currentTarget.style.background = '#33ee33'}
               onMouseOut={(e) => e.currentTarget.style.background = '#44ff44'}
             >
-              START RACE!
+              START
             </button>
           </div>
         </div>
@@ -962,8 +959,9 @@ const DrivingSimulator = () => {
             left: '50%',
             transform: 'translateX(-50%)',
             display: 'flex',
-            gap: '16px',
-            alignItems: 'center'
+            gap: '18px',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}>
             <div style={{
               background: 'rgba(0, 0, 0, 0.65)',
@@ -975,6 +973,20 @@ const DrivingSimulator = () => {
               fontWeight: 'bold'
             }}>
               {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+            </div>
+            <div style={{
+              background: isAutopilot ? 'rgba(138, 43, 226, 0.25)' : 'rgba(0, 0, 0, 0.7)',
+              color: isAutopilot ? '#debaff' : '#ffffff',
+              padding: isAutopilot ? '16px 28px' : '12px 24px',
+              borderRadius: '50px',
+              fontSize: isAutopilot ? '30px' : '22px',
+              fontFamily: 'monospace',
+              fontWeight: 'bold',
+              border: isAutopilot ? '2px solid rgba(138, 43, 226, 0.6)' : '1px solid rgba(255,255,255,0.45)',
+              boxShadow: isAutopilot ? '0 0 18px rgba(138, 43, 226, 0.45)' : 'none',
+              transition: 'all 0.3s ease'
+            }}>
+              {speed} MPH
             </div>
             <div style={{
               background: scoreFlash ? '#ff0000' : 'rgba(0, 0, 0, 0.65)',
@@ -991,26 +1003,7 @@ const DrivingSimulator = () => {
           </div>
           <div style={{
             position: 'absolute',
-            top: '20px',
-            right: '20px',
-            background: isAutopilot ? 'rgba(68, 255, 68, 0.25)' : 'rgba(0, 0, 0, 0.6)',
-            color: isAutopilot ? '#44ff44' : '#ffffff',
-            padding: isAutopilot ? '16px 24px' : '12px 20px',
-            borderRadius: '8px',
-            fontSize: isAutopilot ? '28px' : '20px',
-            fontFamily: 'monospace',
-            fontWeight: 'bold',
-            border: isAutopilot ? '2px solid #44ff44' : '1px solid #ffffff',
-            boxShadow: isAutopilot ? '0 0 12px rgba(68, 255, 68, 0.45)' : 'none',
-            animation: isAutopilot ? 'pulse 2s ease-in-out infinite' : 'none',
-            transition: 'all 0.3s ease'
-          }}>
-            {speed} MPH
-            {isAutopilot && <div style={{ fontSize: '11px', marginTop: '4px', opacity: 0.8 }}>{labelCondition.toUpperCase()}</div>}
-          </div>
-          <div style={{
-            position: 'absolute',
-            top: '72px',
+            top: '130px',
             left: '50%',
             transform: 'translateX(-50%)',
             width: '52%',
@@ -1058,38 +1051,54 @@ const DrivingSimulator = () => {
       {!isComplete && (
         <div style={{
           position: 'absolute',
-          bottom: '30px',
+          bottom: '160px',
           left: '50%',
           transform: 'translateX(-50%)',
           display: 'flex',
-          gap: '20px',
-          alignItems: 'center'
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '14px'
         }}>
           <div style={{
-            background: autopilotPending ? 'rgba(255, 170, 68, 0.85)' : 'rgba(0, 0, 0, 0.7)',
-            color: 'white',
-            padding: '10px 20px',
-            borderRadius: '8px',
-            fontFamily: 'Arial, sans-serif'
+            minWidth: '220px',
+            textAlign: 'center',
+            background: isAutopilot
+              ? 'rgba(68, 255, 68, 0.25)'
+              : autopilotPending
+              ? 'rgba(255, 170, 68, 0.35)'
+              : 'rgba(0, 0, 0, 0.55)',
+            color: isAutopilot ? '#44ff44' : autopilotPending ? '#ffaa44' : 'rgba(255,255,255,0.75)',
+            padding: isAutopilot ? '12px 24px' : '10px 22px',
+            borderRadius: '999px',
+            fontFamily: 'Arial, sans-serif',
+            fontWeight: isAutopilot ? 'bold' : 'normal',
+            border: isAutopilot ? '2px solid rgba(68, 255, 68, 0.6)' : '1px solid rgba(255,255,255,0.25)',
+            boxShadow: isAutopilot ? '0 0 12px rgba(68, 255, 68, 0.4)' : 'none',
+            transition: 'all 0.3s ease',
+            letterSpacing: '0.8px'
           }}>
-            {isAutopilot ? `🤖 ${labelCondition.toUpperCase()}` : autopilotPending ? `⏳ ${labelCondition.toUpperCase()} (waiting for clear lane)` : '👤 MANUAL (WASD)'}
+            {isAutopilot
+              ? `🤖 ${labelCondition.toUpperCase()} ENGAGED`
+              : autopilotPending
+              ? `⏳ ${labelCondition.toUpperCase()} WAITING`
+              : '👤 MANUAL CONTROL'}
           </div>
-          
+
           <button
             onClick={handleToggleAutopilot}
             style={{
-              padding: '12px 24px',
-              fontSize: '16px',
+              padding: '14px 36px',
+              fontSize: '18px',
               fontWeight: 'bold',
               background: isAutopilot ? '#ff4444' : autopilotPending ? '#ffaa44' : '#44ff44',
               color: 'white',
               border: 'none',
-              borderRadius: '8px',
+              borderRadius: '999px',
               cursor: 'pointer',
-              transition: 'all 0.3s'
+              transition: 'all 0.25s'
             }}
           >
-            {isAutopilot ? 'Take Control' : autopilotPending ? `Cancel ${labelCondition} Request` : `Enable ${labelCondition}`}
+            {isAutopilot ? 'Return to Manual' : autopilotPending ? `Cancel ${labelCondition}` : `Enable ${labelCondition}`}
           </button>
         </div>
       )}
@@ -1117,7 +1126,6 @@ const DrivingSimulator = () => {
             Blocks Hit: {simulationDataRef.current.whiteBlocksHit}
           </div>
           <div style={{ fontSize: '14px', marginTop: '10px', color: '#aaaaaa' }}>
-            (Data logged to browser console)
           </div>
         </div>
       )}
