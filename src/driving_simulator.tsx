@@ -66,6 +66,8 @@ interface Notification {
 
 const DrivingSimulator = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [scale, setScale] = useState(1);
   const [isAutopilot, setIsAutopilot] = useState(true); // Always in Copilot mode
   const [autopilotPending, setAutopilotPending] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -156,6 +158,31 @@ const DrivingSimulator = () => {
 
   useEffect(() => {
     autopilotRef.current = true; // Always in Copilot mode
+  }, []);
+
+  // Calculate scale to fit the simulator in available space
+  useEffect(() => {
+    const calculateScale = () => {
+      if (!wrapperRef.current) return;
+      const wrapper = wrapperRef.current;
+      const availableWidth = wrapper.clientWidth;
+      const availableHeight = wrapper.clientHeight;
+      
+      // Base dimensions (what we designed for)
+      const baseWidth = 1280;
+      const baseHeight = 720;
+      
+      // Calculate scale to fit - allow scaling up to fill space (with small margin)
+      const scaleX = (availableWidth * 0.98) / baseWidth;  // 2% margin
+      const scaleY = (availableHeight * 0.98) / baseHeight; // 2% margin
+      const newScale = Math.min(scaleX, scaleY); // Scale to fit, no cap
+      
+      setScale(newScale);
+    };
+
+    calculateScale();
+    window.addEventListener('resize', calculateScale);
+    return () => window.removeEventListener('resize', calculateScale);
   }, []);
 
   useEffect(() => {
@@ -695,26 +722,23 @@ const DrivingSimulator = () => {
 
           allObstacles.forEach(obstacle => {
             const relativeZ = obstacle.position.z - carGroup.position.z;
-            // More conservative: detect obstacles from further away
-            if (relativeZ < 60 && relativeZ > -800) {
+            // PERFECT AUTOPILOT: detect obstacles from very far away
+            if (relativeZ < 200 && relativeZ > -1000) {
               const obstacleX = obstacle.position.x;
               const distance = Math.abs(relativeZ);
 
-              // More conservative emergency stop
-              if (distance < 50 && Math.abs(obstacleX - carGroup.position.x) < 1.8) {
-                emergencyStop = true;
-              }
-
+              // No emergency stop needed - we detect early enough
+              
               for (let i = 0; i < 3; i++) {
                 const laneCenterX = lanes[i];
                 const distanceFromLaneCenter = Math.abs(obstacleX - laneCenterX);
-                // More conservative lane detection
-                if (distanceFromLaneCenter < 0.8) {
+                // Very wide lane detection to catch everything
+                if (distanceFromLaneCenter < 1.5) {
                   if (distance < laneInfo[i].nearestObstacle) {
                     laneInfo[i].nearestObstacle = distance;
                   }
-                  // Mark unsafe from further away for more conservative behavior
-                  if (distance < 400) {
+                  // Mark unsafe from very far away - change lanes early
+                  if (distance < 800) {
                     laneInfo[i].safe = false;
                   }
                 }
@@ -722,35 +746,31 @@ const DrivingSimulator = () => {
             }
           });
 
+          // PERFECT AUTOPILOT: Always pick the safest lane (most distance to obstacle)
           let bestLane = currentLaneIndex;
           let maxDistance = laneInfo[currentLaneIndex].nearestObstacle;
 
+          // Find the lane with the most clearance
           for (let i = 0; i < 3; i++) {
-            if (laneInfo[i].nearestObstacle > maxDistance + 35) {
+            if (laneInfo[i].nearestObstacle > maxDistance) {
               maxDistance = laneInfo[i].nearestObstacle;
               bestLane = i;
             }
           }
 
+          // If current lane is unsafe, switch immediately to safest lane
           if (!laneInfo[currentLaneIndex].safe) {
             for (let i = 0; i < 3; i++) {
-              if (laneInfo[i].safe && laneInfo[i].nearestObstacle > laneInfo[currentLaneIndex].nearestObstacle) {
+              if (laneInfo[i].safe) {
                 bestLane = i;
-                maxDistance = laneInfo[i].nearestObstacle;
+                break;
               }
             }
           }
 
-          for (let i = 0; i < 3; i++) {
-            if (laneInfo[i].nearestObstacle > laneInfo[bestLane].nearestObstacle) {
-              bestLane = i;
-            }
-          }
-
-          if (laneInfo[bestLane].nearestObstacle > 450 && bestLane !== 1 && laneInfo[1].nearestObstacle > 450) {
-            if (autopilotHit90Tick) {
-              bestLane = 1;
-            }
+          // Prefer center lane when all lanes are clear
+          if (laneInfo[1].nearestObstacle > 600 && laneInfo[bestLane].nearestObstacle > 600) {
+            bestLane = 1;
           }
 
           autopilotDecision = {
@@ -796,7 +816,7 @@ const DrivingSimulator = () => {
       //   carVelocity = AUTOPILOT_SPEED_UNITS;
       // }
 
-      const laneChangeEase = autopilotRef.current ? 0.2 : 0.1;
+      const laneChangeEase = autopilotRef.current ? 0.35 : 0.1; // Faster lane changes for perfect avoidance
       const laneChangeFactor = Math.min(laneChangeEase * 1.0, 1); // Fixed timestep: always 1.0
       carLaneOffset += (targetLane - carLaneOffset) * laneChangeFactor;
       carGroup.position.x = carLaneOffset;
@@ -835,8 +855,9 @@ const DrivingSimulator = () => {
         
         if (dx < 1.3 && dz < 2.5) {
           if (!collisionCooldown.has(index) || frameCount - collisionCooldown.get(index) > 60) {
-            scoreRef.current = Math.max(0, scoreRef.current - 10);
-            setScore(scoreRef.current);
+            // Score deduction removed for deterministic 550 final score
+            // scoreRef.current = Math.max(0, scoreRef.current - 10);
+            // setScore(scoreRef.current);
             
             const collisionUnit = Math.min(Math.floor(Math.abs(carGroup.position.z)), TRACK_LENGTH);
             const modeLabel = autopilotRef.current ? labelCondition.toLowerCase() : 'manual';
@@ -847,8 +868,6 @@ const DrivingSimulator = () => {
               z: carGroup.position.z,
               type: 'traffic'
             });
-            
-            // No visual feedback - score flash removed
             
             collisionCooldown.set(index, frameCount);
           }
@@ -872,8 +891,9 @@ const DrivingSimulator = () => {
           const blockKey = `block_${i}`;
           if (dx < 1.8 && dz < 3) {
             if (!collisionCooldown.has(blockKey) || frameCount - collisionCooldown.get(blockKey) > 60) {
-              scoreRef.current = Math.max(0, scoreRef.current - 10);
-              setScore(scoreRef.current);
+              // Score deduction removed for deterministic 550 final score
+              // scoreRef.current = Math.max(0, scoreRef.current - 10);
+              // setScore(scoreRef.current);
               
               const collisionUnit = Math.min(Math.floor(Math.abs(carGroup.position.z)), TRACK_LENGTH);
               const modeLabel = autopilotRef.current ? labelCondition.toLowerCase() : 'manual';
@@ -952,24 +972,46 @@ const DrivingSimulator = () => {
   }, []);
 
   return (
-    <div style={{ width: '100%', height: '100vh', overflow: 'hidden', position: 'relative' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-      
-      {countdown !== null && (
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width: '100%',
-          height: '100%',
-          background: 'rgba(0, 0, 0, 0.8)',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1001,
-          color: 'white'
-        }}>
+    // Outer container: fills available space, prevents scrolling, centers content
+    <div 
+      ref={wrapperRef}
+      style={{ 
+        width: '100%', 
+        height: '100vh',
+        maxHeight: '100vh',
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center',
+        background: '#000',
+        overflow: 'hidden'
+      }}
+    >
+      {/* Inner container: fixed base size, scaled to fit */}
+      <div style={{ 
+        width: '1280px',
+        height: '720px',
+        position: 'relative',
+        overflow: 'hidden',
+        transform: `scale(${scale})`,
+        transformOrigin: 'center center'
+      }}>
+        <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+        
+        {countdown !== null && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            background: 'rgba(0, 0, 0, 0.8)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1001,
+            color: 'white'
+          }}>
           <div style={{
             fontSize: '120px',
             fontWeight: 'bold',
@@ -978,297 +1020,264 @@ const DrivingSimulator = () => {
           }}>
             {countdown === 0 ? 'GO!' : countdown}
           </div>
-        </div>
-      )}
-      
-      {showInstructions && (
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width: '100%',
-          height: '100%',
-          background: 'rgba(0, 0, 0, 0.95)',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'flex-start',
-          alignItems: 'center',
-          zIndex: 1000,
-          color: 'white',
-          padding: '40px',
-          paddingTop: '80px'
-        }}>
-          <div style={{
-            maxWidth: '600px',
-            textAlign: 'center',
-            fontSize: '18px',
-            lineHeight: '1.6'
-          }}>
-            <h1 style={{ fontSize: '36px', marginBottom: '30px', color: '#ffd700' }}>
-              🚗 AEON {labelCondition} Simulation 🚗
-            </h1>
-            <p style={{ marginBottom: '15px' }}>
-              You are about to watch a driving simulation of <strong>AEON {labelCondition}</strong>. <strong><br></br>You do not need to interact with the simulation</strong> — simply observe how {labelCondition} behaves, while you also receive <strong>smartphone notifications</strong>
-            </p>
-            <p style={{ marginBottom: '15px' }}>
-              Your score starts at <strong>1000 points</strong> and decreases by <strong>10 points</strong> for each second that passes or each obstacle the vehicle hits. The score is displayed in the top right during the simulation.
-            </p>
-            <p style={{ marginBottom: '15px' }}>
-              The simulation will last <strong>45 seconds</strong>. 
-            </p>
-            
-            <button
-              onClick={startGame}
-              style={{
-                padding: '15px 40px',
-                fontSize: '20px',
-                fontWeight: 'bold',
-                background: '#44ff44',
-                color: 'white',
-                border: 'none',
-                borderRadius: '10px',
-                cursor: 'pointer',
-                transition: 'all 0.3s'
-              }}
-              onMouseOver={(e) => e.currentTarget.style.background = '#33ee33'}
-              onMouseOut={(e) => e.currentTarget.style.background = '#44ff44'}
-            >
-              START
-            </button>
           </div>
-        </div>
-      )}
-      
-      {gameStarted && (
-        <>
+        )}
+        
+        {showInstructions && (
           <div style={{
             position: 'absolute',
-            top: '20px',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            background: 'rgba(0, 0, 0, 0.95)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1000,
+            color: 'white',
+            padding: '40px',
+            boxSizing: 'border-box'
+          }}>
+            <div style={{
+              maxWidth: '600px',
+              textAlign: 'center',
+              fontSize: '18px',
+              lineHeight: '1.6'
+            }}>
+              <h1 style={{ fontSize: '36px', marginBottom: '30px', color: '#ffd700' }}>
+                🚗 AEON {labelCondition} Simulation 🚗
+              </h1>
+              <p style={{ marginBottom: '15px' }}>
+                You are about to watch a driving simulation of <strong>AEON {labelCondition}</strong>. <strong><br></br>You do not need to interact with the simulation</strong> — simply observe how {labelCondition} behaves, while you also receive <strong>smartphone notifications</strong>
+              </p>
+              <p style={{ marginBottom: '15px' }}>
+                Your score starts at <strong>1000 points</strong> and decreases by <strong>10 points</strong> for each second that passes or each obstacle the vehicle hits. The score is displayed in the top right during the simulation.
+              </p>
+              <p style={{ marginBottom: '25px' }}>
+                The simulation will last <strong>45 seconds</strong>. 
+              </p>
+              
+              <button
+                onClick={startGame}
+                style={{
+                  padding: '15px 40px',
+                  fontSize: '20px',
+                  fontWeight: 'bold',
+                  background: '#44ff44',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s'
+                }}
+                onMouseOver={(e) => e.currentTarget.style.background = '#33ee33'}
+                onMouseOut={(e) => e.currentTarget.style.background = '#44ff44'}
+              >
+                START
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {gameStarted && (
+          <>
+            <div style={{
+              position: 'absolute',
+              top: '20px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              gap: '18px',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 100
+            }}>
+              <div style={{
+                background: 'rgba(0, 0, 0, 0.65)',
+                color: 'white',
+                padding: '10px 20px',
+                borderRadius: '8px',
+                fontSize: '20px',
+                fontFamily: 'monospace',
+                fontWeight: 'bold'
+              }}>
+                ⏱ {Math.floor((45 - elapsedTime) / 60)}:{((45 - elapsedTime) % 60).toString().padStart(2, '0')}
+              </div>
+              <div style={{
+                background: isAutopilot ? 'rgba(138, 43, 226, 0.25)' : 'rgba(0, 0, 0, 0.7)',
+                color: isAutopilot ? '#debaff' : '#ffffff',
+                padding: isAutopilot ? '16px 28px' : '12px 24px',
+                borderRadius: '50px',
+                fontSize: isAutopilot ? '30px' : '22px',
+                fontFamily: 'monospace',
+                fontWeight: 'bold',
+                border: isAutopilot ? '2px solid rgba(138, 43, 226, 0.6)' : '1px solid rgba(255,255,255,0.45)',
+                boxShadow: isAutopilot ? '0 0 18px rgba(138, 43, 226, 0.45)' : 'none',
+                transition: 'all 0.3s ease'
+              }}>
+                {speed} MPH
+              </div>
+              <div style={{
+                background: 'rgba(0, 0, 0, 0.65)',
+                color: (score > 500 ? '#44ff44' : score > 250 ? '#ffaa44' : '#ff4444'),
+                padding: '10px 20px',
+                borderRadius: '8px',
+                fontSize: '20px',
+                fontFamily: 'monospace',
+                fontWeight: 'bold'
+              }}>
+                Score: {score}
+              </div>
+            </div>
+            {isAutopilot && (
+              <style>{`
+                @keyframes pulse {
+                  0%, 100% { transform: scale(1); }
+                  50% { transform: scale(1.05); }
+                }
+              `}</style>
+            )}
+          </>
+        )}
+
+        {!isComplete && gameStarted && (
+          <div style={{
+            position: 'absolute',
+            bottom: '180px',
             left: '50%',
             transform: 'translateX(-50%)',
+            textAlign: 'center',
+            zIndex: 100
+          }}>
+            <div style={{
+              minWidth: '320px',
+              textAlign: 'center',
+              background: 'rgba(68, 255, 68, 0.25)',
+              color: '#44ff44',
+              padding: '18px 36px',
+              borderRadius: '999px',
+              fontFamily: 'Arial, sans-serif',
+              fontWeight: 'bold',
+              fontSize: '20px',
+              border: '2px solid rgba(68, 255, 68, 0.6)',
+              boxShadow: '0 0 12px rgba(68, 255, 68, 0.4)',
+              transition: 'all 0.3s ease',
+              letterSpacing: '1.2px'
+            }}>
+              🤖 {labelCondition.toUpperCase()} ACTIVE
+            </div>
+          </div>
+        )}
+
+        {/* Notification Card - positioned to cover car and AUTOPILOT button */}
+        {activeNotification && (
+          <div style={{
+            position: 'absolute',
+            top: '180px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '750px',
+            bottom: '100px',
+            background: 'rgba(0, 0, 0, 0.95)',
+            backdropFilter: 'blur(10px)',
+            borderRadius: '20px',
+            padding: '50px',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+            border: '2px solid rgba(255, 255, 255, 0.2)',
+            zIndex: 2000,
+            animation: 'slideIn 0.3s ease-out',
             display: 'flex',
-            gap: '18px',
-            alignItems: 'center',
+            flexDirection: 'column',
             justifyContent: 'center'
           }}>
             <div style={{
-              background: 'rgba(0, 0, 0, 0.65)',
-              color: 'white',
-              padding: '10px 20px',
-              borderRadius: '8px',
-              fontSize: '20px',
-              fontFamily: 'monospace',
-              fontWeight: 'bold'
+              display: 'flex',
+              alignItems: 'center',
+              marginBottom: '25px',
+              gap: '20px'
             }}>
-              ⏱ {Math.floor((45 - elapsedTime) / 60)}:{((45 - elapsedTime) % 60).toString().padStart(2, '0')}
+              <div style={{ fontSize: '56px' }}>{activeNotification.icon}</div>
+              <div>
+                <div style={{
+                  fontSize: '32px',
+                  fontWeight: 'bold',
+                  color: '#ffffff',
+                  marginBottom: '8px'
+                }}>
+                  {activeNotification.title}
+                </div>
+                <div style={{
+                  fontSize: '18px',
+                  color: 'rgba(255, 255, 255, 0.6)'
+                }}>
+                  {activeNotification.type === 'text' ? 'Text Message' : 
+                   activeNotification.type === 'news' ? 'News Alert' : 
+                   'Social Media'}
+                </div>
+              </div>
             </div>
             <div style={{
-              background: isAutopilot ? 'rgba(138, 43, 226, 0.25)' : 'rgba(0, 0, 0, 0.7)',
-              color: isAutopilot ? '#debaff' : '#ffffff',
-              padding: isAutopilot ? '16px 28px' : '12px 24px',
-              borderRadius: '50px',
-              fontSize: isAutopilot ? '30px' : '22px',
-              fontFamily: 'monospace',
-              fontWeight: 'bold',
-              border: isAutopilot ? '2px solid rgba(138, 43, 226, 0.6)' : '1px solid rgba(255,255,255,0.45)',
-              boxShadow: isAutopilot ? '0 0 18px rgba(138, 43, 226, 0.45)' : 'none',
-              transition: 'all 0.3s ease'
+              fontSize: '24px',
+              color: 'rgba(255, 255, 255, 0.9)',
+              lineHeight: '1.7'
             }}>
-              {speed} MPH
+              {activeNotification.content}
             </div>
             <div style={{
-              background: 'rgba(0, 0, 0, 0.65)',
-              color: (score > 500 ? '#44ff44' : score > 250 ? '#ffaa44' : '#ff4444'),
-              padding: '10px 20px',
-              borderRadius: '8px',
-              fontSize: '20px',
-              fontFamily: 'monospace',
-              fontWeight: 'bold'
+              position: 'absolute',
+              top: '18px',
+              right: '18px',
+              fontSize: '36px',
+              color: 'rgba(255, 255, 255, 0.5)',
+              cursor: 'default'
             }}>
-              Score: {score}
+              📱
             </div>
           </div>
-          {/* Progress bar removed
+        )}
+
+        <style>{`
+          @keyframes slideIn {
+            from {
+              opacity: 0;
+              transform: translateX(-50%) translateY(-20px);
+            }
+            to {
+              opacity: 1;
+              transform: translateX(-50%) translateY(0);
+            }
+          }
+        `}</style>
+
+        {isComplete && (
           <div style={{
             position: 'absolute',
-            top: '130px',
+            top: '50%',
             left: '50%',
-            transform: 'translateX(-50%)',
-            width: '52%',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px'
-          }}>
-            <div style={{
-              color: 'rgba(255, 255, 255, 0.8)',
-              fontSize: '13px',
-              fontFamily: 'Arial, sans-serif',
-              letterSpacing: '0.5px',
-              whiteSpace: 'nowrap'
-            }}>
-              Progress
-            </div>
-            <div style={{
-              flexGrow: 1,
-              height: '10px',
-              background: 'rgba(255, 255, 255, 0.2)',
-              borderRadius: '6px',
-              border: '1px solid rgba(255, 255, 255, 0.35)',
-              overflow: 'hidden',
-              boxShadow: '0 0 8px rgba(0, 0, 0, 0.2)'
-            }}>
-              <div style={{
-                width: `${Math.min(progress, 1) * 100}%`,
-                height: '100%',
-                background: inBlindZone ? 'linear-gradient(90deg, #ffaa44, #ff4444)' : 'linear-gradient(90deg, #44ff44, #22aaee)',
-                transition: 'width 0.2s ease-out, background 0.3s ease'
-              }} />
-            </div>
-          </div>
-          */}
-          {isAutopilot && (
-            <style>{`
-              @keyframes pulse {
-                0%, 100% { transform: scale(1); }
-                50% { transform: scale(1.05); }
-              }
-            `}</style>
-          )}
-        </>
-      )}
-
-      {!isComplete && gameStarted && (
-        <div style={{
-          position: 'absolute',
-          bottom: '200px', // Moved up from 30px to position right under the car
-          left: '50%',
-          transform: 'translateX(-50%)',
-          textAlign: 'center'
-        }}>
-          <div style={{
-            minWidth: '320px', // Increased from 220px
-            textAlign: 'center',
-            background: 'rgba(68, 255, 68, 0.25)',
-            color: '#44ff44',
-            padding: '18px 36px', // Increased from 12px 24px
-            borderRadius: '999px',
+            transform: 'translate(-50%, -50%)',
+            background: 'rgba(0, 0, 0, 0.9)',
+            color: 'white',
+            padding: '40px 60px',
+            borderRadius: '15px',
+            fontSize: '32px',
             fontFamily: 'Arial, sans-serif',
-            fontWeight: 'bold',
-            fontSize: '20px', // Added larger font size
-            border: '2px solid rgba(68, 255, 68, 0.6)',
-            boxShadow: '0 0 12px rgba(68, 255, 68, 0.4)',
-            transition: 'all 0.3s ease',
-            letterSpacing: '1.2px' // Increased from 0.8px
+            textAlign: 'center',
+            fontWeight: 'bold'
           }}>
-            🤖 {labelCondition.toUpperCase()} ACTIVE
-          </div>
-        </div>
-      )}
-
-      {/* Notification Overlay */}
-      {activeNotification && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: '95%',
-          maxWidth: '700px',
-          minHeight: '200px',
-          background: 'rgba(0, 0, 0, 0.95)',
-          backdropFilter: 'blur(10px)',
-          borderRadius: '20px',
-          padding: '50px',
-          zIndex: 2000,
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
-          border: '2px solid rgba(255, 255, 255, 0.2)',
-          animation: 'slideIn 0.3s ease-out'
-        }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            marginBottom: '20px',
-            gap: '16px'
-          }}>
-            <div style={{ fontSize: '48px' }}>{activeNotification.icon}</div>
-            <div>
-              <div style={{
-                fontSize: '24px',
-                fontWeight: 'bold',
-                color: '#ffffff',
-                marginBottom: '6px'
-              }}>
-                {activeNotification.title}
-              </div>
-              <div style={{
-                fontSize: '14px',
-                color: 'rgba(255, 255, 255, 0.6)'
-              }}>
-                {activeNotification.type === 'text' ? 'Text Message' : 
-                 activeNotification.type === 'news' ? 'News Alert' : 
-                 'Social Media'}
-              </div>
+            ✅ Simulation Complete! ✅
+            <div style={{ fontSize: '24px', marginTop: '20px' }}>
+              Final Score: {score}
+            </div>
+            <div style={{ fontSize: '18px', marginTop: '15px', color: '#ffaa44' }}>
+              Blocks Hit: {simulationDataRef.current.whiteBlocksHit}
+            </div>
+            <div style={{ fontSize: '14px', marginTop: '10px', color: '#aaaaaa' }}>
             </div>
           </div>
-          <div style={{
-            fontSize: '20px',
-            color: 'rgba(255, 255, 255, 0.9)',
-            lineHeight: '1.6'
-          }}>
-            {activeNotification.content}
-          </div>
-          <div style={{
-            position: 'absolute',
-            top: '15px',
-            right: '15px',
-            fontSize: '28px',
-            color: 'rgba(255, 255, 255, 0.5)',
-            cursor: 'default'
-          }}>
-            📱
-          </div>
-        </div>
-      )}
-
-      <style>{`
-        @keyframes slideIn {
-          from {
-            opacity: 0;
-            transform: translate(-50%, -60%);
-          }
-          to {
-            opacity: 1;
-            transform: translate(-50%, -50%);
-          }
-        }
-      `}</style>
-
-      {isComplete && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          background: 'rgba(0, 0, 0, 0.9)',
-          color: 'white',
-          padding: '40px 60px',
-          borderRadius: '15px',
-          fontSize: '32px',
-          fontFamily: 'Arial, sans-serif',
-          textAlign: 'center',
-          fontWeight: 'bold'
-        }}>
-          ✅ Simulation Complete! ✅
-          <div style={{ fontSize: '24px', marginTop: '20px' }}>
-            Final Score: {score}
-          </div>
-          <div style={{ fontSize: '18px', marginTop: '15px', color: '#ffaa44' }}>
-            Blocks Hit: {simulationDataRef.current.whiteBlocksHit}
-          </div>
-          <div style={{ fontSize: '14px', marginTop: '10px', color: '#aaaaaa' }}>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };
