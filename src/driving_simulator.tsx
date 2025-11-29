@@ -35,6 +35,7 @@ interface SimulationData {
   notifications: Notification[];
   notificationsSeen: number; // Count of notifications that were opened/seen
   notificationsTotal: number; // Total notifications received
+  finishLineCrossSecond: number | null; // Second at which finish line was crossed
 }
 
 interface AutopilotDecision {
@@ -71,6 +72,8 @@ interface Notification {
   arrivalSecond: number | null; // Second at which notification arrived
   clickedSecond: number | null; // Second at which notification was clicked
   reactionTime: number | null; // Difference between clicked and arrival (in seconds)
+  openSessions: Array<{ openTime: number; closeTime: number | null }>; // Track each time notification is opened/closed (in seconds)
+  totalOpenDuration: number; // Total seconds notification has been open (sum of all closed sessions)
 }
 
 const DrivingSimulator = () => {
@@ -92,6 +95,7 @@ const DrivingSimulator = () => {
   const notificationsRef = useRef<Notification[]>([]);
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
   const [showNewNotificationPopup, setShowNewNotificationPopup] = useState(false);
+  const [showViewAllNotificationsPopup, setShowViewAllNotificationsPopup] = useState(false);
   const isCompleteRef = useRef(false);
   const gameStartedRef = useRef(false);
   const startTimeRef = useRef<number | null>(null);
@@ -117,7 +121,8 @@ const DrivingSimulator = () => {
     finalScore: 0,
     notifications: [],
     notificationsSeen: 0,
-    notificationsTotal: 0
+    notificationsTotal: 0,
+    finishLineCrossSecond: null
   });
 
   const startGame = () => {
@@ -134,6 +139,7 @@ const DrivingSimulator = () => {
     notificationsRef.current = [];
     setSelectedNotification(null);
     setShowNewNotificationPopup(false);
+    setShowViewAllNotificationsPopup(false);
     failureLaneHitsRef.current = 0;
     lastDistanceUnitLoggedRef.current = -1;
     blindLaneStateRef.current = { index: null, prepopulated: false };
@@ -146,7 +152,8 @@ const DrivingSimulator = () => {
       finalScore: 0,
       notifications: [],
       notificationsSeen: 0,
-      notificationsTotal: 0
+      notificationsTotal: 0,
+      finishLineCrossSecond: null
     };
     
     // Start countdown
@@ -195,6 +202,61 @@ const DrivingSimulator = () => {
   useEffect(() => {
     notificationsRef.current = notifications;
   }, [notifications]);
+
+  // Track notification open/close times
+  useEffect(() => {
+    if (selectedNotification && gameStartedRef.current && startTimeRef.current) {
+      // Notification opened - record open time
+      const currentSecond = Math.floor((Date.now() - startTimeRef.current) / 1000);
+      setNotifications(prev => {
+        const updated = prev.map(n => {
+          if (n.id === selectedNotification.id) {
+            // Check if there's an open session without a close time
+            const hasOpenSession = n.openSessions.length > 0 && 
+              n.openSessions[n.openSessions.length - 1].closeTime === null;
+            
+            if (!hasOpenSession) {
+              // Start new open session
+              return {
+                ...n,
+                openSessions: [...n.openSessions, { openTime: currentSecond, closeTime: null }]
+              };
+            }
+          }
+          return n;
+        });
+        notificationsRef.current = updated;
+        return updated;
+      });
+    } else if (!selectedNotification) {
+      // Notification closed - find any open session and close it
+      setNotifications(prev => {
+        const updated = prev.map(n => {
+          // Check if this notification has an open session
+          if (n.openSessions.length > 0) {
+            const lastSession = n.openSessions[n.openSessions.length - 1];
+            if (lastSession.closeTime === null && gameStartedRef.current && startTimeRef.current) {
+              const currentSecond = Math.floor((Date.now() - startTimeRef.current) / 1000);
+              const sessionDuration = currentSecond - lastSession.openTime;
+              const updatedSessions = [...n.openSessions];
+              updatedSessions[updatedSessions.length - 1] = {
+                ...lastSession,
+                closeTime: currentSecond
+              };
+              return {
+                ...n,
+                openSessions: updatedSessions,
+                totalOpenDuration: n.totalOpenDuration + sessionDuration
+              };
+            }
+          }
+          return n;
+        });
+        notificationsRef.current = updated;
+        return updated;
+      });
+    }
+  }, [selectedNotification]);
 
   // Calculate scale to fit the simulator in available space
   useEffect(() => {
@@ -515,7 +577,9 @@ const DrivingSimulator = () => {
               seen: false,
               arrivalSecond: arrivalSecond,
               clickedSecond: null,
-              reactionTime: null
+              reactionTime: null,
+              openSessions: [],
+              totalOpenDuration: 0
             };
           } else if (notifId === 2) {
             // Breaking News
@@ -529,7 +593,9 @@ const DrivingSimulator = () => {
               seen: false,
               arrivalSecond: arrivalSecond,
               clickedSecond: null,
-              reactionTime: null
+              reactionTime: null,
+              openSessions: [],
+              totalOpenDuration: 0
             };
           } else if (notifId === 3) {
             // Instagram Social Media
@@ -543,7 +609,9 @@ const DrivingSimulator = () => {
               seen: false,
               arrivalSecond: arrivalSecond,
               clickedSecond: null,
-              reactionTime: null
+              reactionTime: null,
+              openSessions: [],
+              totalOpenDuration: 0
             };
           } else if (notifId === 4) {
             // Text message from Sarah
@@ -557,7 +625,9 @@ const DrivingSimulator = () => {
               seen: false,
               arrivalSecond: arrivalSecond,
               clickedSecond: null,
-              reactionTime: null
+              reactionTime: null,
+              openSessions: [],
+              totalOpenDuration: 0
             };
           } else {
             // Music App
@@ -571,7 +641,9 @@ const DrivingSimulator = () => {
               seen: false,
               arrivalSecond: arrivalSecond,
               clickedSecond: null,
-              reactionTime: null
+              reactionTime: null,
+              openSessions: [],
+              totalOpenDuration: 0
             };
           }
           
@@ -702,18 +774,26 @@ const DrivingSimulator = () => {
         console.log('======================');
 
         // Save data to Qualtrics if available
-        if (typeof Qualtrics !== 'undefined') {
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_mode_by_second', JSON.stringify(simulationDataRef.current.modeBySecond));
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_white_blocks_hit', simulationDataRef.current.whiteBlocksHit);
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_failure_lane_hits', simulationDataRef.current.failureLaneHits);
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_mode_by_unit', JSON.stringify(simulationDataRef.current.modeByUnit));
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_collision_events', JSON.stringify(simulationDataRef.current.collisionEvents));
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_final_score', simulationDataRef.current.finalScore);
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications', JSON.stringify(simulationDataRef.current.notifications));
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_total', simulationDataRef.current.notificationsTotal);
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_seen', simulationDataRef.current.notificationsSeen);
-          console.log('Data saved to Qualtrics embedded data');
-        }
+          if (typeof Qualtrics !== 'undefined') {
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_mode_by_second', JSON.stringify(simulationDataRef.current.modeBySecond));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_white_blocks_hit', simulationDataRef.current.whiteBlocksHit);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_failure_lane_hits', simulationDataRef.current.failureLaneHits);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_mode_by_unit', JSON.stringify(simulationDataRef.current.modeByUnit));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_collision_events', JSON.stringify(simulationDataRef.current.collisionEvents));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_final_score', simulationDataRef.current.finalScore);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_finish_line_cross_second', simulationDataRef.current.finishLineCrossSecond !== null ? simulationDataRef.current.finishLineCrossSecond : '');
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications', JSON.stringify(simulationDataRef.current.notifications));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_total', simulationDataRef.current.notificationsTotal);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_seen', simulationDataRef.current.notificationsSeen);
+            // Export notification open duration data
+            const notificationsWithDuration = simulationDataRef.current.notifications.map((n: Notification) => ({
+              id: n.id,
+              totalOpenDuration: n.totalOpenDuration,
+              openSessions: n.openSessions
+            }));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_open_duration', JSON.stringify(notificationsWithDuration));
+            console.log('Data saved to Qualtrics embedded data');
+          }
       }
 
       const distanceTravelled = Math.abs(carGroup.position.z);
@@ -1228,53 +1308,139 @@ const DrivingSimulator = () => {
       if (carGroup.position.z <= finishLineZ && !isCompleteRef.current && !finishLineCrossed) {
         finishLineCrossed = true;
         finishLineCrossTime = Date.now();
-        simulationDataRef.current.finalScore = scoreRef.current;
-        simulationDataRef.current.failureLaneHits = failureLaneHitsRef.current;
-        ensureModeByUnitComplete();
+        
+        // Calculate elapsed time in seconds when finish line is crossed
+        const finishLineElapsed = startTimeRef.current && gameStartedRef.current
+          ? Math.floor((Date.now() - startTimeRef.current) / 1000)
+          : null;
+        simulationDataRef.current.finishLineCrossSecond = finishLineElapsed;
         
         // Capture notification data at finish (use ref to get current state)
         const currentNotifications = notificationsRef.current;
-        simulationDataRef.current.notifications = currentNotifications;
-        simulationDataRef.current.notificationsTotal = currentNotifications.length;
-        simulationDataRef.current.notificationsSeen = currentNotifications.filter(n => n.seen).length;
+        const allNotificationsSeen = currentNotifications.length > 0 && 
+          currentNotifications.every(n => n.seen);
         
-        setIsComplete(true);
-        clearInterval(timerInterval);
-        
-        console.log('=== SIMULATION DATA ===');
-        console.log('Mode by second:', simulationDataRef.current.modeBySecond);
-        console.log('White blocks hit:', simulationDataRef.current.whiteBlocksHit);
-        console.log('Failure-lane hits:', simulationDataRef.current.failureLaneHits);
-        console.log('Mode by unit length:', simulationDataRef.current.modeByUnit.length);
-        console.log('Collision events:', simulationDataRef.current.collisionEvents.length);
-        console.log('Final score:', simulationDataRef.current.finalScore);
-        console.log('Notifications total:', simulationDataRef.current.notificationsTotal);
-        console.log('Notifications seen:', simulationDataRef.current.notificationsSeen);
-        console.log('Notifications:', simulationDataRef.current.notifications);
-        console.log('======================');
+        if (allNotificationsSeen) {
+          // All notifications seen - complete the simulation
+          simulationDataRef.current.finalScore = scoreRef.current;
+          simulationDataRef.current.failureLaneHits = failureLaneHitsRef.current;
+          ensureModeByUnitComplete();
+          
+          simulationDataRef.current.notifications = currentNotifications;
+          simulationDataRef.current.notificationsTotal = currentNotifications.length;
+          simulationDataRef.current.notificationsSeen = currentNotifications.filter(n => n.seen).length;
+          
+          console.log('=== SIMULATION DATA ===');
+          console.log('Mode by second:', simulationDataRef.current.modeBySecond);
+          console.log('White blocks hit:', simulationDataRef.current.whiteBlocksHit);
+          console.log('Failure-lane hits:', simulationDataRef.current.failureLaneHits);
+          console.log('Mode by unit length:', simulationDataRef.current.modeByUnit.length);
+          console.log('Collision events:', simulationDataRef.current.collisionEvents.length);
+          console.log('Final score:', simulationDataRef.current.finalScore);
+          console.log('Notifications total:', simulationDataRef.current.notificationsTotal);
+          console.log('Notifications seen:', simulationDataRef.current.notificationsSeen);
+          console.log('Notifications:', simulationDataRef.current.notifications);
+          console.log('======================');
 
-        if (typeof Qualtrics !== 'undefined') {
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_mode_by_second', JSON.stringify(simulationDataRef.current.modeBySecond));
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_white_blocks_hit', simulationDataRef.current.whiteBlocksHit);
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_failure_lane_hits', simulationDataRef.current.failureLaneHits);
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_mode_by_unit', JSON.stringify(simulationDataRef.current.modeByUnit));
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_collision_events', JSON.stringify(simulationDataRef.current.collisionEvents));
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_final_score', simulationDataRef.current.finalScore);
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications', JSON.stringify(simulationDataRef.current.notifications));
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_total', simulationDataRef.current.notificationsTotal);
-          Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_seen', simulationDataRef.current.notificationsSeen);
-          console.log('Data saved to Qualtrics embedded data');
+          if (typeof Qualtrics !== 'undefined') {
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_mode_by_second', JSON.stringify(simulationDataRef.current.modeBySecond));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_white_blocks_hit', simulationDataRef.current.whiteBlocksHit);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_failure_lane_hits', simulationDataRef.current.failureLaneHits);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_mode_by_unit', JSON.stringify(simulationDataRef.current.modeByUnit));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_collision_events', JSON.stringify(simulationDataRef.current.collisionEvents));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_final_score', simulationDataRef.current.finalScore);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_finish_line_cross_second', simulationDataRef.current.finishLineCrossSecond !== null ? simulationDataRef.current.finishLineCrossSecond : '');
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications', JSON.stringify(simulationDataRef.current.notifications));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_total', simulationDataRef.current.notificationsTotal);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_seen', simulationDataRef.current.notificationsSeen);
+            // Export notification open duration data
+            const notificationsWithDuration = currentNotifications.map((n: Notification) => ({
+              id: n.id,
+              totalOpenDuration: n.totalOpenDuration,
+              openSessions: n.openSessions
+            }));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_open_duration', JSON.stringify(notificationsWithDuration));
+            console.log('Data saved to Qualtrics embedded data');
+          }
+
+          // Remove all blocks immediately
+          finalBlocks.forEach(block => {
+            scene.remove(block);
+          });
+          finalBlocks.length = 0;
+          
+          setIsComplete(true);
+          clearInterval(timerInterval);
+          setShowViewAllNotificationsPopup(false);
+        } else {
+          // Not all notifications seen - keep simulation running and show popup
+          setShowViewAllNotificationsPopup(true);
         }
-
-        // Remove all blocks immediately
-        finalBlocks.forEach(block => {
-          scene.remove(block);
-        });
-        finalBlocks.length = 0;
       }
       
-      // Stop car after 5 seconds of coasting past finish line
-      if (finishLineCrossed && finishLineCrossTime) {
+      // Check if all notifications are now seen (after finish line crossed)
+      if (finishLineCrossed && !isCompleteRef.current) {
+        const currentNotifications = notificationsRef.current;
+        const allNotificationsSeen = currentNotifications.length > 0 && 
+          currentNotifications.every(n => n.seen);
+        
+        if (allNotificationsSeen) {
+          // All notifications now seen - complete the simulation
+          simulationDataRef.current.finalScore = scoreRef.current;
+          simulationDataRef.current.failureLaneHits = failureLaneHitsRef.current;
+          ensureModeByUnitComplete();
+          
+          simulationDataRef.current.notifications = currentNotifications;
+          simulationDataRef.current.notificationsTotal = currentNotifications.length;
+          simulationDataRef.current.notificationsSeen = currentNotifications.filter(n => n.seen).length;
+          
+          console.log('=== SIMULATION DATA ===');
+          console.log('Mode by second:', simulationDataRef.current.modeBySecond);
+          console.log('White blocks hit:', simulationDataRef.current.whiteBlocksHit);
+          console.log('Failure-lane hits:', simulationDataRef.current.failureLaneHits);
+          console.log('Mode by unit length:', simulationDataRef.current.modeByUnit.length);
+          console.log('Collision events:', simulationDataRef.current.collisionEvents.length);
+          console.log('Final score:', simulationDataRef.current.finalScore);
+          console.log('Notifications total:', simulationDataRef.current.notificationsTotal);
+          console.log('Notifications seen:', simulationDataRef.current.notificationsSeen);
+          console.log('Notifications:', simulationDataRef.current.notifications);
+          console.log('======================');
+
+          if (typeof Qualtrics !== 'undefined') {
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_mode_by_second', JSON.stringify(simulationDataRef.current.modeBySecond));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_white_blocks_hit', simulationDataRef.current.whiteBlocksHit);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_failure_lane_hits', simulationDataRef.current.failureLaneHits);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_mode_by_unit', JSON.stringify(simulationDataRef.current.modeByUnit));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_collision_events', JSON.stringify(simulationDataRef.current.collisionEvents));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_final_score', simulationDataRef.current.finalScore);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_finish_line_cross_second', simulationDataRef.current.finishLineCrossSecond !== null ? simulationDataRef.current.finishLineCrossSecond : '');
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications', JSON.stringify(simulationDataRef.current.notifications));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_total', simulationDataRef.current.notificationsTotal);
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_seen', simulationDataRef.current.notificationsSeen);
+            // Export notification open duration data
+            const notificationsWithDuration = currentNotifications.map((n: Notification) => ({
+              id: n.id,
+              totalOpenDuration: n.totalOpenDuration,
+              openSessions: n.openSessions
+            }));
+            Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_open_duration', JSON.stringify(notificationsWithDuration));
+            console.log('Data saved to Qualtrics embedded data');
+          }
+
+          // Remove all blocks immediately
+          finalBlocks.forEach(block => {
+            scene.remove(block);
+          });
+          finalBlocks.length = 0;
+          
+          setIsComplete(true);
+          clearInterval(timerInterval);
+          setShowViewAllNotificationsPopup(false);
+        }
+      }
+      
+      // Stop car after 5 seconds of coasting past finish line (only if all notifications are seen)
+      if (finishLineCrossed && finishLineCrossTime && isCompleteRef.current) {
         const timeSinceFinish = (Date.now() - finishLineCrossTime) / 1000;
         if (timeSinceFinish >= 5) {
           carVelocity = 0;
@@ -1378,7 +1544,8 @@ const DrivingSimulator = () => {
             boxSizing: 'border-box'
           }}>
             <div style={{
-              maxWidth: '600px',
+              maxWidth: '900px',
+              width: '90%',
               textAlign: 'center',
               fontSize: '18px',
               lineHeight: '1.6'
@@ -1386,15 +1553,23 @@ const DrivingSimulator = () => {
               <h1 style={{ fontSize: '36px', marginBottom: '30px', color: '#ffd700' }}>
                 🚗 AEON {labelCondition} Simulation 🚗
               </h1>
-              <p>This is a <strong>Safe Driving Simulation</strong>. Your goal is to reach the <strong>Finish Line</strong> as quickly and safely as possible.</p>
               <p style={{ marginBottom: '20px' }}>
-                You start in <strong>{labelCondition}</strong>. You can switch to manual mode using the "Return to Manual" button. In manual mode, you can navigate using the arrow keys. 
+                This is a driving simulation. Your goal is to reach the Finish Line and answer all your cell phone messages as quickly and safely as possible.
               </p>
-              <p style={{ marginBottom: '20px', color: '#ffd700', fontWeight: 'bold' }}>
-                ⚠️ <strong>IMPORTANT:</strong> You will receive notifications on the scren during the simulation. You must <strong>open and read all notifications</strong> by the finish line to get the full bonus. You can open a notification by clicking its icon at the bottom of the screen.
+              <p style={{ marginBottom: '20px' }}>
+                You start in <strong style={{ textDecoration: 'underline' }}>{labelCondition}</strong>. You can switch to manual mode using the "Return to Manual" button. In manual mode, you can navigate using the arrow keys (up, down, left, right). You can also switch back to <strong style={{ textDecoration: 'underline' }}>{labelCondition}</strong> mode from manual mode.
+              </p>
+              <p style={{ marginBottom: '20px' }}>
+                You start with <strong style={{ color: '#44ff44' }}>1000</strong> points.
+              </p>
+              <p style={{ marginBottom: '20px' }}>
+                You lose <strong style={{ color: '#ff4444' }}>10 points</strong> per obstacle hit and <strong style={{ color: '#ff4444' }}>5 points</strong> per second that passes. Time will only stop passing once you reach the finish line AND you have answered all your cell phone messages.
+              </p>
+              <p style={{ marginBottom: '20px' }}>
+                Each time you receive a cellphone notification, it will appear at the bottom of your screen.
               </p>
               <p style={{ marginBottom: '25px' }}>
-                You start with <strong>1000</strong> points. <br></br> You lose <strong>5 points persecond</strong> and <strong>10 points</strong> per obstacle hit.  
+                To read it, click the icon, read the message, then close the message.
               </p>
               
               <button
@@ -1596,6 +1771,29 @@ const DrivingSimulator = () => {
           </div>
         )}
 
+        {/* "View All Notifications" Popup - Persistent reminder */}
+        {showViewAllNotificationsPopup && (
+          <div style={{
+            position: 'absolute',
+            top: '150px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(255, 68, 68, 0.95)',
+            color: 'white',
+            padding: '14px 28px',
+            borderRadius: '8px',
+            fontSize: '17px',
+            fontFamily: 'Arial, sans-serif',
+            fontWeight: 'bold',
+            zIndex: 1500,
+            boxShadow: '0 4px 16px rgba(255, 68, 68, 0.6)',
+            border: '2px solid rgba(255, 255, 255, 0.5)',
+            animation: 'pulse 2s ease-in-out infinite'
+          }}>
+            ⚠️ Please view all notifications to complete the simulation!
+          </div>
+        )}
+
         {/* Notification Icons Bar - Bottom of Screen */}
         {gameStarted && notifications.length > 0 && (
           <div style={{
@@ -1704,19 +1902,20 @@ const DrivingSimulator = () => {
               top: '50%',
               left: '50%',
               transform: 'translate(-50%, -50%)',
-              width: '600px',
-              height: '30vh',
+              width: 'min(600px, 90vw)',
+              maxHeight: '80vh',
               background: 'rgba(0, 0, 0, 0.95)',
               backdropFilter: 'blur(10px)',
               borderRadius: '20px',
-              padding: '40px',
+              padding: 'min(40px, 4vh)',
               boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
               border: '2px solid rgba(255, 255, 255, 0.2)',
               zIndex: 2000,
               animation: 'slideIn 0.3s ease-out',
               display: 'flex',
               flexDirection: 'column',
-              overflowY: 'auto'
+              overflow: 'hidden',
+              boxSizing: 'border-box'
             }}
             onClick={(e) => {
               // Close when clicking outside the content
@@ -1728,13 +1927,14 @@ const DrivingSimulator = () => {
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              marginBottom: '20px',
-              gap: '15px'
+              marginBottom: 'min(20px, 2vh)',
+              gap: '15px',
+              flexShrink: 0
             }}>
-              <div style={{ fontSize: '48px' }}>{selectedNotification.icon}</div>
-              <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 'min(48px, 5vw)' }}>{selectedNotification.icon}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
-                  fontSize: '28px',
+                  fontSize: 'min(28px, 3.5vw)',
                   fontWeight: 'bold',
                   color: '#ffffff',
                   marginBottom: '6px'
@@ -1742,7 +1942,7 @@ const DrivingSimulator = () => {
                   {selectedNotification.title}
                 </div>
                 <div style={{
-                  fontSize: '16px',
+                  fontSize: 'min(16px, 2vw)',
                   color: 'rgba(255, 255, 255, 0.6)'
                 }}>
                   {selectedNotification.type === 'text' ? 'Text Message' : 
@@ -1765,7 +1965,8 @@ const DrivingSimulator = () => {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  transition: 'background 0.2s'
+                  transition: 'background 0.2s',
+                  flexShrink: 0
                 }}
                 onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
                 onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
@@ -1774,9 +1975,13 @@ const DrivingSimulator = () => {
               </button>
             </div>
             <div style={{
-              fontSize: '20px',
+              fontSize: 'min(20px, 2.5vw)',
               color: 'rgba(255, 255, 255, 0.9)',
-              lineHeight: '1.6'
+              lineHeight: '1.6',
+              overflowY: 'auto',
+              flex: 1,
+              minHeight: 0,
+              paddingRight: '8px'
             }}>
               {selectedNotification.content}
             </div>
@@ -1802,6 +2007,16 @@ const DrivingSimulator = () => {
             10%, 90% {
               opacity: 1;
               transform: translateX(-50%) translateY(0);
+            }
+          }
+          @keyframes pulse {
+            0%, 100% {
+              opacity: 1;
+              transform: translateX(-50%) scale(1);
+            }
+            50% {
+              opacity: 0.9;
+              transform: translateX(-50%) scale(1.02);
             }
           }
         `}</style>
