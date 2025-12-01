@@ -1649,7 +1649,7 @@ const DrivingSimulator = () => {
             </div>
             <div style={{
               position: 'absolute',
-              top: '110px',
+              top: '90px',
               left: '50%',
               transform: 'translateX(-50%)',
               width: '52%',
@@ -1698,7 +1698,7 @@ const DrivingSimulator = () => {
         {!isComplete && gameStarted && (
           <div style={{
             position: 'absolute',
-            bottom: '260px',
+            bottom: '180px',
             left: '50%',
             transform: 'translateX(-50%)',
             display: 'flex',
