@@ -11,7 +11,7 @@ const AUTOPILOT_MAX_MPH = 120;
 const CAR_UNITS_TO_MPH = AUTOPILOT_MAX_MPH / AUTOPILOT_SPEED_UNITS;
 // const MANUAL_MAX_VELOCITY = MANUAL_MAX_MPH / CAR_UNITS_TO_MPH; // REMOVED: Manual uses same speed as autopilot
 const MANUAL_MAX_VELOCITY = AUTOPILOT_SPEED_UNITS; // Manual mode now uses same speed as autopilot
-const labelCondition = 'Full Self-Driving';
+const labelCondition = 'Copilot';
 
 // Notification timing (in seconds) - configurable
 const NOTIFICATION_1_TIME = 9;  // First notification at 8 seconds
@@ -71,8 +71,9 @@ interface Notification {
   timestamp: number;
   seen: boolean;
   arrivalSecond: number | null; // Time at which notification arrived (in seconds, 3 decimal places)
-  clickedSecond: number | null; // Time at which notification was clicked (in seconds, 3 decimal places)
-  reactionTime: number | null; // Difference between clicked and arrival (in seconds, 3 decimal places)
+  clickedSecond: number | null; // Time at which notification was clicked (in seconds, 3 decimal places) - set to arrivalSecond when auto-opens
+  reactionTime: number | null; // Difference between clicked and arrival (in seconds, 3 decimal places) - will be 0 when auto-opens
+  timeToClose: number | null; // Time from clickedSecond to when notification was closed (in seconds, 3 decimal places)
   openSessions: Array<{ openTime: number; closeTime: number | null; mode: string }>; // Track each time notification is opened/closed (in seconds, 3 decimal places), with mode at open time
   totalOpenDuration: number; // Total seconds notification has been open (sum of all closed sessions, 3 decimal places)
 }
@@ -81,7 +82,7 @@ const DrivingSimulator = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
-  const [isAutopilot, setIsAutopilot] = useState(false);
+  const [isAutopilot, setIsAutopilot] = useState(true); // Start in Autopilot mode
   const [autopilotPending, setAutopilotPending] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
@@ -94,7 +95,7 @@ const DrivingSimulator = () => {
   const [progress, setProgress] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const notificationsRef = useRef<Notification[]>([]);
-  const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
+  const [openNotifications, setOpenNotifications] = useState<Notification[]>([]); // Array of currently open notifications (stacked)
   const [showNewNotificationPopup, setShowNewNotificationPopup] = useState(false);
   const [showViewAllNotificationsPopup, setShowViewAllNotificationsPopup] = useState(false);
   const isCompleteRef = useRef(false);
@@ -129,8 +130,8 @@ const DrivingSimulator = () => {
   const startGame = () => {
     setShowInstructions(false);
     setCountdown(3);
-    setIsAutopilot(false);
-    autopilotRef.current = false;
+    setIsAutopilot(true); // Start in Autopilot mode
+    autopilotRef.current = true; // Start in Autopilot mode
     autopilotPendingRef.current = false;
     setAutopilotPending(false);
     progressRef.current = 0;
@@ -138,7 +139,7 @@ const DrivingSimulator = () => {
     setElapsedTime(0);
     setNotifications([]);
     notificationsRef.current = [];
-    setSelectedNotification(null);
+    setOpenNotifications([]);
     setShowNewNotificationPopup(false);
     setShowViewAllNotificationsPopup(false);
     failureLaneHitsRef.current = 0;
@@ -180,17 +181,18 @@ const DrivingSimulator = () => {
     }, 1000);
   };
 
-  const handleToggleAutopilot = () => {
-    if (isAutopilot || autopilotPendingRef.current) {
-      setIsAutopilot(false);
-      autopilotRef.current = false;
-      autopilotPendingRef.current = false;
-      setAutopilotPending(false);
-    } else {
-      autopilotPendingRef.current = true;
-      setAutopilotPending(true);
-    }
-  };
+  // REMOVED: Manual mode toggle - participants stay in Autopilot mode
+  // const handleToggleAutopilot = () => {
+  //   if (isAutopilot || autopilotPendingRef.current) {
+  //     setIsAutopilot(false);
+  //     autopilotRef.current = false;
+  //     autopilotPendingRef.current = false;
+  //     setAutopilotPending(false);
+  //   } else {
+  //     autopilotPendingRef.current = true;
+  //     setAutopilotPending(true);
+  //   }
+  // };
 
   const blindProgressThreshold = 1 - (AUTOPILOT_BLIND_DISTANCE / TRACK_LENGTH);
   const inBlindZone = progress >= blindProgressThreshold;
@@ -206,51 +208,47 @@ const DrivingSimulator = () => {
 
   // Track notification open/close times
   useEffect(() => {
-    if (selectedNotification && gameStartedRef.current && startTimeRef.current) {
-      // Notification opened - record open time (with 3 decimal places) and current mode
+    if (gameStartedRef.current && startTimeRef.current) {
       const currentTime = parseFloat(((Date.now() - startTimeRef.current) / 1000).toFixed(3));
       const currentMode = autopilotRef.current ? labelCondition.toLowerCase() : 'manual';
+      
+      // Get IDs of currently open notifications
+      const openIds = new Set(openNotifications.map(n => n.id));
+      
       setNotifications(prev => {
         const updated = prev.map(n => {
-          if (n.id === selectedNotification.id) {
-            // Check if there's an open session without a close time
-            const hasOpenSession = n.openSessions.length > 0 && 
-              n.openSessions[n.openSessions.length - 1].closeTime === null;
-            
-            if (!hasOpenSession) {
-              // Start new open session with current mode
-              return {
-                ...n,
-                openSessions: [...n.openSessions, { openTime: currentTime, closeTime: null, mode: currentMode }]
-              };
-            }
-          }
-          return n;
-        });
-        notificationsRef.current = updated;
-        return updated;
-      });
-    } else if (!selectedNotification) {
-      // Notification closed - find any open session and close it
-      setNotifications(prev => {
-        const updated = prev.map(n => {
-          // Check if this notification has an open session
-          if (n.openSessions.length > 0) {
+          const isOpen = openIds.has(n.id);
+          const hasOpenSession = n.openSessions.length > 0 && 
+            n.openSessions[n.openSessions.length - 1].closeTime === null;
+          
+          if (isOpen && !hasOpenSession) {
+            // Notification just opened - start new open session
+            return {
+              ...n,
+              openSessions: [...n.openSessions, { openTime: currentTime, closeTime: null, mode: currentMode }]
+            };
+          } else if (!isOpen && hasOpenSession) {
+            // Notification just closed - close the open session
             const lastSession = n.openSessions[n.openSessions.length - 1];
-            if (lastSession.closeTime === null && gameStartedRef.current && startTimeRef.current) {
-              const currentTime = parseFloat(((Date.now() - startTimeRef.current) / 1000).toFixed(3));
-              const sessionDuration = parseFloat((currentTime - lastSession.openTime).toFixed(3));
-              const updatedSessions = [...n.openSessions];
-              updatedSessions[updatedSessions.length - 1] = {
-                ...lastSession,
-                closeTime: currentTime
-              };
-              return {
-                ...n,
-                openSessions: updatedSessions,
-                totalOpenDuration: n.totalOpenDuration + sessionDuration
-              };
+            const sessionDuration = parseFloat((currentTime - lastSession.openTime).toFixed(3));
+            const updatedSessions = [...n.openSessions];
+            updatedSessions[updatedSessions.length - 1] = {
+              ...lastSession,
+              closeTime: currentTime
+            };
+            
+            // Calculate timeToClose if this is the first time closing (and clickedSecond exists)
+            let timeToClose = n.timeToClose;
+            if (timeToClose === null && n.clickedSecond !== null) {
+              timeToClose = parseFloat((currentTime - n.clickedSecond).toFixed(3));
             }
+            
+            return {
+              ...n,
+              openSessions: updatedSessions,
+              totalOpenDuration: n.totalOpenDuration + sessionDuration,
+              timeToClose: timeToClose
+            };
           }
           return n;
         });
@@ -258,7 +256,7 @@ const DrivingSimulator = () => {
         return updated;
       });
     }
-  }, [selectedNotification]);
+  }, [openNotifications]);
 
   // Calculate scale to fit the simulator in available space
   useEffect(() => {
@@ -489,31 +487,32 @@ const DrivingSimulator = () => {
     let finishLineCrossed = false;
     let finishLineCrossTime: number | null = null;
     
-    const keys: Keys = {
-      ArrowUp: false,
-      ArrowDown: false,
-      ArrowLeft: false,
-      ArrowRight: false
-    };
+    // REMOVED: Manual control keyboard handlers - participants stay in Autopilot mode
+    // const keys: Keys = {
+    //   ArrowUp: false,
+    //   ArrowDown: false,
+    //   ArrowLeft: false,
+    //   ArrowRight: false
+    // };
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key;
-      if (key in keys) {
-        keys[key] = true;
-        e.preventDefault(); // Prevent default browser behavior (scrolling)
-      }
-    };
+    // const handleKeyDown = (e: KeyboardEvent) => {
+    //   const key = e.key;
+    //   if (key in keys) {
+    //     keys[key] = true;
+    //     e.preventDefault(); // Prevent default browser behavior (scrolling)
+    //   }
+    // };
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      const key = e.key;
-      if (key in keys) {
-        keys[key] = false;
-        e.preventDefault(); // Prevent default browser behavior
-      }
-    };
+    // const handleKeyUp = (e: KeyboardEvent) => {
+    //   const key = e.key;
+    //   if (key in keys) {
+    //     keys[key] = false;
+    //     e.preventDefault(); // Prevent default browser behavior
+    //   }
+    // };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+    // window.addEventListener('keydown', handleKeyDown);
+    // window.addEventListener('keyup', handleKeyUp);
 
     // Timer - only start when game begins
     let lastScoreDeduction = 0;
@@ -580,8 +579,9 @@ const DrivingSimulator = () => {
               timestamp: Date.now(),
               seen: false,
               arrivalSecond: arrivalSecond,
-              clickedSecond: null,
-              reactionTime: null,
+              clickedSecond: arrivalSecond, // Auto-opens, so clickedSecond = arrivalSecond
+              reactionTime: 0, // Auto-opens, so reactionTime = 0
+              timeToClose: null, // Will be set when notification is closed
               openSessions: [],
               totalOpenDuration: 0
             };
@@ -596,8 +596,9 @@ const DrivingSimulator = () => {
               timestamp: Date.now(),
               seen: false,
               arrivalSecond: arrivalSecond,
-              clickedSecond: null,
-              reactionTime: null,
+              clickedSecond: arrivalSecond, // Auto-opens, so clickedSecond = arrivalSecond
+              reactionTime: 0, // Auto-opens, so reactionTime = 0
+              timeToClose: null, // Will be set when notification is closed
               openSessions: [],
               totalOpenDuration: 0
             };
@@ -612,8 +613,9 @@ const DrivingSimulator = () => {
               timestamp: Date.now(),
               seen: false,
               arrivalSecond: arrivalSecond,
-              clickedSecond: null,
-              reactionTime: null,
+              clickedSecond: arrivalSecond, // Auto-opens, so clickedSecond = arrivalSecond
+              reactionTime: 0, // Auto-opens, so reactionTime = 0
+              timeToClose: null, // Will be set when notification is closed
               openSessions: [],
               totalOpenDuration: 0
             };
@@ -628,8 +630,9 @@ const DrivingSimulator = () => {
               timestamp: Date.now(),
               seen: false,
               arrivalSecond: arrivalSecond,
-              clickedSecond: null,
-              reactionTime: null,
+              clickedSecond: arrivalSecond, // Auto-opens, so clickedSecond = arrivalSecond
+              reactionTime: 0, // Auto-opens, so reactionTime = 0
+              timeToClose: null, // Will be set when notification is closed
               openSessions: [],
               totalOpenDuration: 0
             };
@@ -644,20 +647,25 @@ const DrivingSimulator = () => {
               timestamp: Date.now(),
               seen: false,
               arrivalSecond: arrivalSecond,
-              clickedSecond: null,
-              reactionTime: null,
+              clickedSecond: arrivalSecond, // Auto-opens, so clickedSecond = arrivalSecond
+              reactionTime: 0, // Auto-opens, so reactionTime = 0
+              timeToClose: null, // Will be set when notification is closed
               openSessions: [],
               totalOpenDuration: 0
             };
           }
           
-          // Add notification to array
+          // Add notification to array and mark as seen (since it auto-opens)
+          const notificationWithSeen = { ...notification, seen: true };
           setNotifications(prev => {
-            const updated = [...prev, notification];
+            const updated = [...prev, notificationWithSeen];
             notificationsRef.current = updated; // Keep ref in sync
             return updated;
           });
           notificationStartTimes.set(notifId, Date.now());
+          
+          // Auto-open the notification (it arrives already expanded) - add to openNotifications array
+          setOpenNotifications(prev => [...prev, notificationWithSeen]);
           
           // Show "new notification" popup
           setShowNewNotificationPopup(true);
@@ -794,7 +802,8 @@ const DrivingSimulator = () => {
             const notificationsWithDuration = simulationDataRef.current.notifications.map((n: Notification) => ({
               id: n.id,
               totalOpenDuration: n.totalOpenDuration,
-              openSessions: n.openSessions
+              openSessions: n.openSessions,
+              timeToClose: n.timeToClose
             }));
             Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_open_duration', JSON.stringify(notificationsWithDuration));
           console.log('Data saved to Qualtrics embedded data');
@@ -1115,44 +1124,45 @@ const DrivingSimulator = () => {
           targetLane = lanes[currentLaneIndex];
           }
       } else {
+        // REMOVED: Manual control - participants stay in Autopilot mode
         // Manual control - car moves at constant speed, player can only change lanes
         
         // Only allow movement after game starts
-        if (gameStartedRef.current) {
-          // When switching from autopilot to manual, maintain same speed (no speed change needed)
-          if (wasAutopilot) {
-            // carVelocity = Math.min(carVelocity, MANUAL_MAX_VELOCITY); // REMOVED: No speed capping needed
-            wasAutopilot = false;
-          }
-          
-          // Maintain constant speed in manual mode (same as autopilot speed)
-          if (carVelocity < MANUAL_MAX_VELOCITY) {
-            carVelocity = Math.min(carVelocity + 0.005 * 1.0, MANUAL_MAX_VELOCITY); // Fixed timestep: reach constant speed
-          }
-          
-          // REMOVED: Speed control - player can no longer accelerate/decelerate
-          // Player can accelerate further with ArrowUp
-          // if (keys.ArrowUp) {
-          //   carVelocity = Math.min(carVelocity + 0.008 * 1.0, MANUAL_MAX_VELOCITY); // Max 75 MPH (MANUAL_MAX_VELOCITY carVelocity)
-          // }
-          // if (keys.ArrowDown) {
-          //   carVelocity = Math.max(carVelocity - 0.025 * 1.0, 0);
-          // }
-          
-          // Player can only change lanes (left/right)
-          if (keys.ArrowLeft && currentLaneIndex > 0) {
-            currentLaneIndex--;
-            targetLane = lanes[currentLaneIndex];
-            keys.ArrowLeft = false;
-          }
-          if (keys.ArrowRight && currentLaneIndex < 2) {
-            currentLaneIndex++;
-            targetLane = lanes[currentLaneIndex];
-            keys.ArrowRight = false;
-          }
-        } else {
-          carVelocity = 0;
-        }
+        // if (gameStartedRef.current) {
+        //   // When switching from autopilot to manual, maintain same speed (no speed change needed)
+        //   if (wasAutopilot) {
+        //     // carVelocity = Math.min(carVelocity, MANUAL_MAX_VELOCITY); // REMOVED: No speed capping needed
+        //     wasAutopilot = false;
+        //   }
+        //   
+        //   // Maintain constant speed in manual mode (same as autopilot speed)
+        //   if (carVelocity < MANUAL_MAX_VELOCITY) {
+        //     carVelocity = Math.min(carVelocity + 0.005 * 1.0, MANUAL_MAX_VELOCITY); // Fixed timestep: reach constant speed
+        //   }
+        //   
+        //   // REMOVED: Speed control - player can no longer accelerate/decelerate
+        //   // Player can accelerate further with ArrowUp
+        //   // if (keys.ArrowUp) {
+        //   //   carVelocity = Math.min(carVelocity + 0.008 * 1.0, MANUAL_MAX_VELOCITY); // Max 75 MPH (MANUAL_MAX_VELOCITY carVelocity)
+        //   // }
+        //   // if (keys.ArrowDown) {
+        //   //   carVelocity = Math.max(carVelocity - 0.025 * 1.0, 0);
+        //   // }
+        //   
+        //   // Player can only change lanes (left/right)
+        //   if (keys.ArrowLeft && currentLaneIndex > 0) {
+        //     currentLaneIndex--;
+        //     targetLane = lanes[currentLaneIndex];
+        //     keys.ArrowLeft = false;
+        //   }
+        //   if (keys.ArrowRight && currentLaneIndex < 2) {
+        //     currentLaneIndex++;
+        //     targetLane = lanes[currentLaneIndex];
+        //     keys.ArrowRight = false;
+        //   }
+        // } else {
+        //   carVelocity = 0;
+        // }
       }
 
       // Large frame skip protection (not needed with fixed timestep, but keeping for safety)
@@ -1366,7 +1376,8 @@ const DrivingSimulator = () => {
             const notificationsWithDuration = currentNotifications.map((n: Notification) => ({
               id: n.id,
               totalOpenDuration: n.totalOpenDuration,
-              openSessions: n.openSessions
+              openSessions: n.openSessions,
+              timeToClose: n.timeToClose
             }));
             Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_open_duration', JSON.stringify(notificationsWithDuration));
             console.log('Data saved to Qualtrics embedded data');
@@ -1430,7 +1441,8 @@ const DrivingSimulator = () => {
             const notificationsWithDuration = currentNotifications.map((n: Notification) => ({
               id: n.id,
               totalOpenDuration: n.totalOpenDuration,
-              openSessions: n.openSessions
+              openSessions: n.openSessions,
+              timeToClose: n.timeToClose
             }));
             Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_open_duration', JSON.stringify(notificationsWithDuration));
             console.log('Data saved to Qualtrics embedded data');
@@ -1469,8 +1481,9 @@ const DrivingSimulator = () => {
       if (animationId !== undefined) {
         cancelAnimationFrame(animationId);
       }
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+      // REMOVED: Manual control keyboard handlers
+      // window.removeEventListener('keydown', handleKeyDown);
+      // window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('resize', handleResize);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       clearInterval(timerInterval);
@@ -1563,7 +1576,7 @@ const DrivingSimulator = () => {
                 🚗 AEON {labelCondition} Simulation 🚗
               </h1>
               <p style={{ marginBottom: '20px' }}>
-                <strong>Important:</strong> Your goal is to reach the Finish Line and read all smartphone notifications safely. <br></br>Your car will start in <strong style={{ textDecoration: 'underline' }}>Manual</strong> mode 
+                <strong>Important:</strong> Your goal is to reach the Finish Line safely. <br></br>Your car will start in <strong style={{ textDecoration: 'underline' }}>{labelCondition}</strong> mode. Smartphone notifications will appear and open automatically.
 
               </p>
               {/* <p style={{ marginBottom: '10px' }}>
@@ -1600,7 +1613,7 @@ const DrivingSimulator = () => {
                 onMouseOver={(e) => e.currentTarget.style.background = '#33ee33'}
                 onMouseOut={(e) => e.currentTarget.style.background = '#44ff44'}
               >
-                START MANUAL MODE
+                START {labelCondition.toUpperCase()}
               </button>
             </div>
           </div>
@@ -1702,10 +1715,35 @@ const DrivingSimulator = () => {
                 }
               `}</style>
             )}
+            {/* Mode status indicator - shows Autopilot engaged, fades when complete */}
+            {!isComplete && (
+              <div style={{
+                position: 'absolute',
+                bottom: '180px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                minWidth: '200px',
+                textAlign: 'center',
+                background: 'rgba(68, 255, 68, 0.25)',
+                color: '#44ff44',
+                padding: '11px 22px',
+                borderRadius: '999px',
+                fontFamily: 'Arial, sans-serif',
+                fontWeight: 'bold',
+                border: '2px solid rgba(68, 255, 68, 0.6)',
+                boxShadow: '0 0 12px rgba(68, 255, 68, 0.4)',
+                transition: 'all 0.3s ease',
+                letterSpacing: '0.8px',
+                zIndex: 100
+              }}>
+                {labelCondition.toUpperCase()} ENGAGED
+              </div>
+            )}
           </>
         )}
 
-        {!isComplete && gameStarted && (
+        {/* REMOVED: Toggle button UI - participants stay in Autopilot mode */}
+        {/* {!isComplete && gameStarted && (
           <div style={{
             position: 'absolute',
             bottom: '180px',
@@ -1759,7 +1797,7 @@ const DrivingSimulator = () => {
               {isAutopilot ? 'Return to Manual' : autopilotPending ? `Cancel ${labelCondition}` : `Enable ${labelCondition}`}
             </button>
           </div>
-        )}
+        )} */}
 
         {/* "New Notification" Popup */}
         {showNewNotificationPopup && (
@@ -1826,32 +1864,27 @@ const DrivingSimulator = () => {
               <div
                 key={notif.id}
                 onClick={() => {
-                  setSelectedNotification(notif);
-                  
-                  // Calculate current elapsed time (with 3 decimal places)
-                  const clickedSecond = startTimeRef.current && gameStartedRef.current
-                    ? parseFloat(((Date.now() - startTimeRef.current) / 1000).toFixed(3))
-                    : null;
-                  
-                  // Mark as seen and record click time
+                  // Mark as seen if not already seen
                   setNotifications(prev => {
                     const updated = prev.map(n => {
                       if (n.id === notif.id && !n.seen) {
-                        // Only update if not already seen (first click)
-                        const reactionTime = clickedSecond !== null && n.arrivalSecond !== null
-                          ? parseFloat((clickedSecond - n.arrivalSecond).toFixed(3))
-                          : null;
                         return { 
                           ...n, 
-                          seen: true,
-                          clickedSecond: clickedSecond,
-                          reactionTime: reactionTime
+                          seen: true
                         };
                       }
                       return n;
                     });
                     notificationsRef.current = updated; // Keep ref in sync
                     return updated;
+                  });
+                  
+                  // Add to openNotifications if not already open
+                  setOpenNotifications(prev => {
+                    if (prev.some(n => n.id === notif.id)) {
+                      return prev; // Already open
+                    }
+                    return [...prev, notif];
                   });
                 }}
                 style={{
@@ -1906,97 +1939,116 @@ const DrivingSimulator = () => {
           </div>
         )}
 
-        {/* Full Notification View - When Icon is Clicked */}
-        {selectedNotification && (
-          <div 
-            style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: 'min(540px, 90vw)',
-              maxHeight: '90vh',
-              minHeight: '360px',
-            background: 'rgba(0, 0, 0, 0.95)',
-            backdropFilter: 'blur(10px)',
-              borderRadius: '18px',
-              padding: 'min(36px, 4vh)',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
-            border: '2px solid rgba(255, 255, 255, 0.2)',
-            zIndex: 2000,
-            animation: 'slideIn 0.3s ease-out',
-            display: 'flex',
-            flexDirection: 'column',
-              overflow: 'visible',
-              boxSizing: 'border-box'
-            }}
-            onClick={(e) => {
-              // Close when clicking outside the content
-              if (e.target === e.currentTarget) {
-                setSelectedNotification(null);
-              }
-            }}
-          >
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              marginBottom: 'min(20px, 2vh)',
-              gap: '15px',
-              flexShrink: 0
-            }}>
-              <div style={{ fontSize: 'min(43px, 5vw)' }}>{selectedNotification.icon}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  fontSize: 'min(25px, 3.5vw)',
-                  fontWeight: 'bold',
-                  color: '#ffffff',
-                  marginBottom: '5px'
-                }}>
-                  {selectedNotification.title}
+        {/* Full Notification View - Stacked notifications */}
+        {openNotifications.length > 0 && (
+          <>
+            {openNotifications.map((notif, index) => {
+              // Newest notifications are at the end of array, so they get higher z-index
+              // With slight offset for stacking effect (newer notifications offset more)
+              const offset = index * 2; // 2px offset per stacked notification
+              const zIndex = 2000 + index; // Higher z-index for newer notifications (last in array)
+              const isTopNotification = index === openNotifications.length - 1;
+              
+              return (
+                <div 
+                  key={notif.id}
+                  style={{
+                    position: 'absolute',
+                    top: `calc(50% + ${offset}px)`,
+                    left: `calc(50% + ${offset}px)`,
+                    transform: 'translate(-50%, -50%)',
+                    width: 'min(540px, 90vw)',
+                    maxHeight: '90vh',
+                    minHeight: '360px',
+                    background: 'rgba(0, 0, 0, 0.95)',
+                    backdropFilter: 'blur(10px)',
+                    borderRadius: '18px',
+                    padding: 'min(36px, 4vh)',
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+                    border: '2px solid rgba(255, 255, 255, 0.2)',
+                    zIndex: zIndex,
+                    animation: 'slideIn 0.3s ease-out',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'visible',
+                    boxSizing: 'border-box',
+                    pointerEvents: isTopNotification ? 'auto' : 'none' // Only top notification is interactive
+                  }}
+                  onClick={(e) => {
+                    // Close when clicking outside the content (only for top notification)
+                    if (e.target === e.currentTarget && isTopNotification) {
+                      setOpenNotifications(prev => prev.filter(n => n.id !== notif.id));
+                    }
+                  }}
+                >
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    marginBottom: 'min(20px, 2vh)',
+                    gap: '15px',
+                    flexShrink: 0
+                  }}>
+                    <div style={{ fontSize: 'min(43px, 5vw)' }}>{notif.icon}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 'min(25px, 3.5vw)',
+                        fontWeight: 'bold',
+                        color: '#ffffff',
+                        marginBottom: '5px'
+                      }}>
+                        {notif.title}
+                      </div>
+                      <div style={{
+                        fontSize: 'min(14px, 2vw)',
+                        color: 'rgba(255, 255, 255, 0.6)'
+                      }}>
+                        {notif.type === 'text' ? 'Text Message' : 
+                         notif.type === 'news' ? 'News Alert' : 
+                         notif.type === 'music' ? 'Music App' :
+                         'Social Media'}
+                      </div>
+                    </div>
+                    {isTopNotification && ( // Only show close button on top notification
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenNotifications(prev => prev.filter(n => n.id !== notif.id));
+                        }}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.1)',
+                          border: 'none',
+                          borderRadius: '50%',
+                          width: '29px',
+                          height: '29px',
+                          color: 'white',
+                          fontSize: '18px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          transition: 'background 0.2s',
+                          flexShrink: 0
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                  <div style={{
+                    fontSize: 'min(18px, 2.5vw)',
+                    color: 'rgba(255, 255, 255, 0.9)',
+                    lineHeight: '1.6',
+                    overflow: 'visible',
+                    wordWrap: 'break-word'
+                  }}>
+                    {notif.content}
+                  </div>
                 </div>
-                <div style={{
-                  fontSize: 'min(14px, 2vw)',
-                  color: 'rgba(255, 255, 255, 0.6)'
-                }}>
-                  {selectedNotification.type === 'text' ? 'Text Message' : 
-                   selectedNotification.type === 'news' ? 'News Alert' : 
-                   selectedNotification.type === 'music' ? 'Music App' :
-                   'Social Media'}
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedNotification(null)}
-                style={{
-                  background: 'rgba(255, 255, 255, 0.1)',
-                  border: 'none',
-                  borderRadius: '50%',
-                  width: '29px',
-                  height: '29px',
-                  color: 'white',
-                  fontSize: '18px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'background 0.2s',
-                  flexShrink: 0
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
-              >
-                ×
-              </button>
-            </div>
-            <div style={{
-              fontSize: 'min(18px, 2.5vw)',
-              color: 'rgba(255, 255, 255, 0.9)',
-              lineHeight: '1.6',
-              overflow: 'visible',
-              wordWrap: 'break-word'
-            }}>
-              {selectedNotification.content}
-            </div>
-          </div>
+              );
+            })}
+          </>
         )}
 
         <style>{`
