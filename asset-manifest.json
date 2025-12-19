@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/av_labeling_simulation_co_simplified/static/css/main.fdbcbbd2.css",
+    "main.js": "/av_labeling_simulation_co_simplified/static/js/main.339d02bd.js",
+    "index.html": "/av_labeling_simulation_co_simplified/index.html",
+    "main.fdbcbbd2.css.map": "/av_labeling_simulation_co_simplified/static/css/main.fdbcbbd2.css.map",
+    "main.339d02bd.js.map": "/av_labeling_simulation_co_simplified/static/js/main.339d02bd.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.fdbcbbd2.css",
+    "static/js/main.339d02bd.js"
+  ]
+}
