@@ -74,6 +74,7 @@ interface Notification {
   clickedSecond: number | null; // Time at which notification was clicked (in seconds, 3 decimal places) - set to arrivalSecond when auto-opens
   reactionTime: number | null; // Difference between clicked and arrival (in seconds, 3 decimal places) - will be 0 when auto-opens
   timeToClose: number | null; // Time from clickedSecond to when notification was closed (in seconds, 3 decimal places)
+  closedAfterFinishLine: boolean | null; // Whether notification was closed after finish line was crossed (null if never closed)
   openSessions: Array<{ openTime: number; closeTime: number | null; mode: string }>; // Track each time notification is opened/closed (in seconds, 3 decimal places), with mode at open time
   totalOpenDuration: number; // Total seconds notification has been open (sum of all closed sessions, 3 decimal places)
 }
@@ -237,18 +238,26 @@ const DrivingSimulator = () => {
               closeTime: currentTime
             };
             
-            // Calculate timeToClose if this is the first time closing (and clickedSecond exists)
-            let timeToClose = n.timeToClose;
-            if (timeToClose === null && n.clickedSecond !== null) {
-              timeToClose = parseFloat((currentTime - n.clickedSecond).toFixed(3));
-            }
-            
-            return {
-              ...n,
-              openSessions: updatedSessions,
-              totalOpenDuration: n.totalOpenDuration + sessionDuration,
-              timeToClose: timeToClose
-            };
+              // Calculate timeToClose if this is the first time closing (and clickedSecond exists)
+              // Always record timeToClose even if after finish line
+              let timeToClose = n.timeToClose;
+              let closedAfterFinishLine = n.closedAfterFinishLine;
+              
+              if (timeToClose === null && n.clickedSecond !== null) {
+                timeToClose = parseFloat((currentTime - n.clickedSecond).toFixed(3));
+                
+                // Check if closed after finish line
+                const finishLineTime = simulationDataRef.current.finishLineCrossSecond;
+                closedAfterFinishLine = finishLineTime !== null && currentTime > finishLineTime;
+              }
+              
+              return {
+                ...n,
+                openSessions: updatedSessions,
+                totalOpenDuration: n.totalOpenDuration + sessionDuration,
+                timeToClose: timeToClose,
+                closedAfterFinishLine: closedAfterFinishLine
+              };
           }
           return n;
         });
@@ -582,6 +591,7 @@ const DrivingSimulator = () => {
               clickedSecond: arrivalSecond, // Auto-opens, so clickedSecond = arrivalSecond
               reactionTime: 0, // Auto-opens, so reactionTime = 0
               timeToClose: null, // Will be set when notification is closed
+              closedAfterFinishLine: null, // Will be set when notification is closed
               openSessions: [],
               totalOpenDuration: 0
             };
@@ -599,6 +609,7 @@ const DrivingSimulator = () => {
               clickedSecond: arrivalSecond, // Auto-opens, so clickedSecond = arrivalSecond
               reactionTime: 0, // Auto-opens, so reactionTime = 0
               timeToClose: null, // Will be set when notification is closed
+              closedAfterFinishLine: null, // Will be set when notification is closed
               openSessions: [],
               totalOpenDuration: 0
             };
@@ -616,6 +627,7 @@ const DrivingSimulator = () => {
               clickedSecond: arrivalSecond, // Auto-opens, so clickedSecond = arrivalSecond
               reactionTime: 0, // Auto-opens, so reactionTime = 0
               timeToClose: null, // Will be set when notification is closed
+              closedAfterFinishLine: null, // Will be set when notification is closed
               openSessions: [],
               totalOpenDuration: 0
             };
@@ -633,6 +645,7 @@ const DrivingSimulator = () => {
               clickedSecond: arrivalSecond, // Auto-opens, so clickedSecond = arrivalSecond
               reactionTime: 0, // Auto-opens, so reactionTime = 0
               timeToClose: null, // Will be set when notification is closed
+              closedAfterFinishLine: null, // Will be set when notification is closed
               openSessions: [],
               totalOpenDuration: 0
             };
@@ -650,6 +663,7 @@ const DrivingSimulator = () => {
               clickedSecond: arrivalSecond, // Auto-opens, so clickedSecond = arrivalSecond
               reactionTime: 0, // Auto-opens, so reactionTime = 0
               timeToClose: null, // Will be set when notification is closed
+              closedAfterFinishLine: null, // Will be set when notification is closed
               openSessions: [],
               totalOpenDuration: 0
             };
@@ -803,7 +817,8 @@ const DrivingSimulator = () => {
               id: n.id,
               totalOpenDuration: n.totalOpenDuration,
               openSessions: n.openSessions,
-              timeToClose: n.timeToClose
+              timeToClose: n.timeToClose,
+              closedAfterFinishLine: n.closedAfterFinishLine
             }));
             Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_open_duration', JSON.stringify(notificationsWithDuration));
           console.log('Data saved to Qualtrics embedded data');
@@ -1377,7 +1392,8 @@ const DrivingSimulator = () => {
               id: n.id,
               totalOpenDuration: n.totalOpenDuration,
               openSessions: n.openSessions,
-              timeToClose: n.timeToClose
+              timeToClose: n.timeToClose,
+              closedAfterFinishLine: n.closedAfterFinishLine
             }));
             Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_open_duration', JSON.stringify(notificationsWithDuration));
             console.log('Data saved to Qualtrics embedded data');
@@ -1442,7 +1458,8 @@ const DrivingSimulator = () => {
               id: n.id,
               totalOpenDuration: n.totalOpenDuration,
               openSessions: n.openSessions,
-              timeToClose: n.timeToClose
+              timeToClose: n.timeToClose,
+              closedAfterFinishLine: n.closedAfterFinishLine
             }));
             Qualtrics.SurveyEngine.setEmbeddedData('sim_notifications_open_duration', JSON.stringify(notificationsWithDuration));
             console.log('Data saved to Qualtrics embedded data');
