@@ -1959,6 +1959,26 @@ const DrivingSimulator = () => {
         {/* Full Notification View - Stacked notifications */}
         {openNotifications.length > 0 && (
           <>
+            {/* Backdrop overlay to occlude the entire screen including score/progress bars */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                background: 'rgba(0, 0, 0, 0.7)',
+                zIndex: 1999, // Just below notifications but above everything else
+                pointerEvents: 'auto'
+              }}
+              onClick={(e) => {
+                // Close top notification when clicking backdrop
+                if (openNotifications.length > 0) {
+                  const topNotif = openNotifications[openNotifications.length - 1];
+                  setOpenNotifications(prev => prev.filter(n => n.id !== topNotif.id));
+                }
+              }}
+            />
             {openNotifications.map((notif, index) => {
               // Newest notifications are at the end of array, so they get higher z-index
               // With slight offset for stacking effect (newer notifications offset more)
@@ -1974,30 +1994,59 @@ const DrivingSimulator = () => {
                     top: `calc(50% + ${offset}px)`,
                     left: `calc(50% + ${offset}px)`,
                     transform: 'translate(-50%, -50%)',
-                    width: 'min(540px, 90vw)',
-                    maxHeight: '90vh',
-                    minHeight: '360px',
+                    width: 'min(800px, 95vw)',
+                    height: 'min(550px, 80vh)',
                     background: 'rgba(0, 0, 0, 0.95)',
                     backdropFilter: 'blur(10px)',
                     borderRadius: '18px',
-                    padding: 'min(36px, 4vh)',
+                    padding: 'min(48px, 5vh)',
                     boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
                     border: '2px solid rgba(255, 255, 255, 0.2)',
                     zIndex: zIndex,
                     animation: 'slideIn 0.3s ease-out',
                     display: 'flex',
                     flexDirection: 'column',
-                    overflow: 'visible',
+                    justifyContent: 'center',
+                    overflow: 'auto',
                     boxSizing: 'border-box',
                     pointerEvents: isTopNotification ? 'auto' : 'none' // Only top notification is interactive
                   }}
                   onClick={(e) => {
-                    // Close when clicking outside the content (only for top notification)
-                    if (e.target === e.currentTarget && isTopNotification) {
-                      setOpenNotifications(prev => prev.filter(n => n.id !== notif.id));
-                    }
+                    // Prevent closing when clicking inside the notification content
+                    e.stopPropagation();
                   }}
                 >
+                  {/* Close button in top right corner */}
+                  {isTopNotification && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenNotifications(prev => prev.filter(n => n.id !== notif.id));
+                      }}
+                      style={{
+                        position: 'absolute',
+                        top: '16px',
+                        right: '16px',
+                        background: 'rgba(255, 255, 255, 0.1)',
+                        border: 'none',
+                        borderRadius: '50%',
+                        width: '32px',
+                        height: '32px',
+                        color: 'white',
+                        fontSize: '20px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'background 0.2s',
+                        zIndex: 1
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
+                    >
+                      ×
+                    </button>
+                  )}
                   <div style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -2005,10 +2054,10 @@ const DrivingSimulator = () => {
                     gap: '15px',
                     flexShrink: 0
                   }}>
-                    <div style={{ fontSize: 'min(43px, 5vw)' }}>{notif.icon}</div>
+                    <div style={{ fontSize: 'min(50px, 6vw)' }}>{notif.icon}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
-                        fontSize: 'min(25px, 3.5vw)',
+                        fontSize: 'min(30px, 4vw)',
                         fontWeight: 'bold',
                         color: '#ffffff',
                         marginBottom: '5px'
@@ -2016,7 +2065,7 @@ const DrivingSimulator = () => {
                         {notif.title}
                       </div>
                       <div style={{
-                        fontSize: 'min(14px, 2vw)',
+                        fontSize: 'min(16px, 2.2vw)',
                         color: 'rgba(255, 255, 255, 0.6)'
                       }}>
                         {notif.type === 'text' ? 'Text Message' : 
@@ -2025,36 +2074,9 @@ const DrivingSimulator = () => {
                          'Social Media'}
                       </div>
                     </div>
-                    {isTopNotification && ( // Only show close button on top notification
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOpenNotifications(prev => prev.filter(n => n.id !== notif.id));
-                        }}
-                        style={{
-                          background: 'rgba(255, 255, 255, 0.1)',
-                          border: 'none',
-                          borderRadius: '50%',
-                          width: '29px',
-                          height: '29px',
-                          color: 'white',
-                          fontSize: '18px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          transition: 'background 0.2s',
-                          flexShrink: 0
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
-                      >
-                        ×
-                      </button>
-                    )}
                   </div>
                   <div style={{
-                    fontSize: 'min(18px, 2.5vw)',
+                    fontSize: 'min(22px, 3vw)',
                     color: 'rgba(255, 255, 255, 0.9)',
                     lineHeight: '1.6',
                     overflow: 'visible',
